@@ -1328,6 +1328,7 @@ func playerHandler(c echo.Context) error {
 	for _, ps := range pss {
 		comp, ok := competitionMap[ps.CompetitionID]
 		if ok != true {
+			fmt.Printf("competitionID: %v, competitionMap:%v", ps.CompetitionID, competitionMap)
 			return fmt.Errorf("error retrieveCompetition")
 		}
 		psds = append(psds, PlayerScoreDetail{
