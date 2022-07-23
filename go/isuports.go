@@ -48,8 +48,6 @@ var (
 	adminDB *sqlx.DB
 
 	sqliteDriverName = "sqlite3"
-
-	tenantIdToUpdateCacher *IntCacher
 )
 
 // 環境変数を取得する、なければデフォルト値を返す
@@ -233,7 +231,6 @@ func Run() {
 	adminDB.SetMaxOpenConns(10)
 	defer adminDB.Close()
 
-	tenantIdToUpdateCacher = NewIntCacher()
 	go updateBilling()
 
 	port := getEnv("SERVER_APP_PORT", "3000")
@@ -731,7 +728,7 @@ func tenantsBillingHandler(c echo.Context) error {
 	})
 }
 
-func updateBilling() {
+func updateBilling(tenantId int64) {
 	for {
 		ctx := context.Background()
 
@@ -1200,8 +1197,6 @@ func competitionScoreHandler(c echo.Context) error {
 		}
 	}
 
-	tenantIdToUpdateCacher.Put(v.tenantID, v.tenantID)
-
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
 		Data:   ScoreHandlerResult{Rows: int64(len(playerScoreRows))},
@@ -1432,8 +1427,6 @@ func competitionRankingHandler(c echo.Context) error {
 			v.playerID, tenant.ID, competitionID, now, now, err,
 		)
 	}
-
-	tenantIdToUpdateCacher.Put(tenant.ID, tenant.ID)
 
 	var rankAfter int64
 	rankAfterStr := c.QueryParam("rank_after")
