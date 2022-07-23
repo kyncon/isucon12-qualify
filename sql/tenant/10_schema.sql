@@ -19,6 +19,7 @@ CREATE TABLE player (
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
+CREATE INDEX player_tenant_id ON player(tenant_id);
 
 CREATE TABLE player_score (
   id VARCHAR(255) NOT NULL PRIMARY KEY,
