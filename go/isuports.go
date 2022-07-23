@@ -329,6 +329,7 @@ type TenantRow struct {
 	ID          int64  `db:"id"`
 	Name        string `db:"name"`
 	DisplayName string `db:"display_name"`
+	Billing     int64  `db:"billing"`
 	CreatedAt   int64  `db:"created_at"`
 	UpdatedAt   int64  `db:"updated_at"`
 }
@@ -667,45 +668,13 @@ func tenantsBillingHandler(c echo.Context) error {
 	}
 	tenantBillings := make([]TenantWithBilling, 0, len(ts))
 	for _, t := range ts {
-		if beforeID != 0 && beforeID <= t.ID {
-			continue
+		tb := TenantWithBilling{
+			ID:          strconv.FormatInt(t.ID, 10),
+			Name:        t.Name,
+			DisplayName: t.DisplayName,
+			BillingYen:  t.Billing,
 		}
-		err := func(t TenantRow) error {
-			tb := TenantWithBilling{
-				ID:          strconv.FormatInt(t.ID, 10),
-				Name:        t.Name,
-				DisplayName: t.DisplayName,
-			}
-			tenantDB, err := connectToTenantDB(t.ID)
-			if err != nil {
-				return fmt.Errorf("failed to connectToTenantDB: %w", err)
-			}
-			defer tenantDB.Close()
-			cs := []CompetitionRow{}
-			if err := tenantDB.SelectContext(
-				ctx,
-				&cs,
-				"SELECT * FROM competition WHERE tenant_id=?",
-				t.ID,
-			); err != nil {
-				return fmt.Errorf("failed to Select competition: %w", err)
-			}
-			for _, comp := range cs {
-				report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
-				if err != nil {
-					return fmt.Errorf("failed to billingReportByCompetition: %w", err)
-				}
-				tb.BillingYen += report.BillingYen
-			}
-			tenantBillings = append(tenantBillings, tb)
-			return nil
-		}(t)
-		if err != nil {
-			return err
-		}
-		if len(tenantBillings) >= 10 {
-			break
-		}
+		tenantBillings = append(tenantBillings, tb)
 	}
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
@@ -713,6 +682,58 @@ func tenantsBillingHandler(c echo.Context) error {
 			Tenants: tenantBillings,
 		},
 	})
+}
+
+func updateBilling(tenantId int64) {
+	ctx := context.Background()
+
+	t := TenantRow{}
+	if err := adminDB.SelectContext(
+		ctx,
+		&t,
+		"SELECT * FROM tenant WHERE tenant_id=?",
+		tenantId,
+	); err != nil {
+		fmt.Printf("failed to Select competition: %w\n", err)
+		return
+	}
+	err := func(t TenantRow) error {
+		tb := TenantWithBilling{
+			ID:          strconv.FormatInt(t.ID, 10),
+			Name:        t.Name,
+			DisplayName: t.DisplayName,
+		}
+		tenantDB, err := connectToTenantDB(t.ID)
+		if err != nil {
+			return fmt.Errorf("failed to connectToTenantDB: %w", err)
+		}
+		defer tenantDB.Close()
+		cs := []CompetitionRow{}
+		if err := tenantDB.SelectContext(
+			ctx,
+			&cs,
+			"SELECT * FROM competition WHERE tenant_id=?",
+			t.ID,
+		); err != nil {
+			return fmt.Errorf("failed to Select competition: %w", err)
+		}
+		for _, comp := range cs {
+			report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
+			if err != nil {
+				return fmt.Errorf("failed to billingReportByCompetition: %w", err)
+			}
+			tb.BillingYen += report.BillingYen
+		}
+		if err != nil {
+			if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", tb.BillingYen, t.ID); err != nil {
+				return fmt.Errorf("error Update player: billing=%d, id=%d, %w", tb.BillingYen, t.ID, err)
+			}
+		}
+		return nil
+	}(t)
+	if err != nil {
+		fmt.Printf("error Select tenant: %w\n", err)
+	}
 }
 
 type PlayerDetail struct {
@@ -929,6 +950,7 @@ func competitionsAddHandler(c echo.Context) error {
 			id, v.tenantID, title, now, now, err,
 		)
 	}
+	go updateBilling(v.tenantID)
 
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
