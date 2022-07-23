@@ -48,7 +48,7 @@ func run(file string) error {
 		if err != nil {
 			return err
 		}
-		dataList[parseQuery(d.Statement)] = append(dataList[d.Statement], d)
+		dataList[d.Statement] = append(dataList[d.Statement], d)
 	}
 
 	fmt.Println("statement, count, average")
@@ -70,10 +70,14 @@ func run(file string) error {
 		return results[i].average > results[j].average
 	})
 
+	for _, res := range results {
+		fmt.Printf("%s, %i, %f\n", res.query, res.count, res.average)
+	}
+
 	return nil
 }
 
-var re = regexp.MustCompile("\((?, )*\)")
+var re = regexp.MustCompile("(\\?, )+")
 
 func parseQuery(query string) string {
 	return string(re.ReplaceAll([]byte(query), []byte("(?)")))
