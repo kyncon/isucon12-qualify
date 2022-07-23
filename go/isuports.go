@@ -231,8 +231,6 @@ func Run() {
 	adminDB.SetMaxOpenConns(10)
 	defer adminDB.Close()
 
-	go updateBilling()
-
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
 	serverPort := fmt.Sprintf(":%s", port)
@@ -729,62 +727,54 @@ func tenantsBillingHandler(c echo.Context) error {
 }
 
 func updateBilling(tenantId int64) {
-	for {
-		ctx := context.Background()
+	ctx := context.Background()
 
-		tenantIds := tenantIdToUpdateCacher.Keys()
-		ts := []TenantRow{}
-		if len(tenantIds) != 0 {
-			orgQuery := "SELECT * FROM `tenant` WHERE id IN (?)"
-			query, args, err := sqlx.In(orgQuery, tenantIds)
+	t := TenantRow{}
+	if err := adminDB.SelectContext(
+		ctx,
+		&t,
+		"SELECT * FROM tenant WHERE tenant_id=?",
+		tenantId,
+	); err != nil {
+		fmt.Printf("failed to Select competition: %w\n", err)
+		return
+	}
+	err := func(t TenantRow) error {
+		tb := TenantWithBilling{
+			ID:          strconv.FormatInt(t.ID, 10),
+			Name:        t.Name,
+			DisplayName: t.DisplayName,
+		}
+		tenantDB, err := connectToTenantDB(t.ID)
+		if err != nil {
+			return fmt.Errorf("failed to connectToTenantDB: %w", err)
+		}
+		defer tenantDB.Close()
+		cs := []CompetitionRow{}
+		if err := tenantDB.SelectContext(
+			ctx,
+			&cs,
+			"SELECT * FROM competition WHERE tenant_id=?",
+			t.ID,
+		); err != nil {
+			return fmt.Errorf("failed to Select competition: %w", err)
+		}
+		for _, comp := range cs {
+			report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
 			if err != nil {
-				return
+				return fmt.Errorf("failed to billingReportByCompetition: %w", err)
 			}
-			err = adminDB.Select(&ts, query, args...)
-			if err != nil {
-				return
+			tb.BillingYen += report.BillingYen
+		}
+		if err != nil {
+			if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", tb.BillingYen, t.ID); err != nil {
+				return fmt.Errorf("error Update player: billing=%d, id=%d, %w", tb.BillingYen, t.ID, err)
 			}
 		}
-		for _, t := range ts {
-			err := func(t TenantRow) error {
-				tb := TenantWithBilling{
-					ID:          strconv.FormatInt(t.ID, 10),
-					Name:        t.Name,
-					DisplayName: t.DisplayName,
-				}
-				tenantDB, err := connectToTenantDB(t.ID)
-				if err != nil {
-					return fmt.Errorf("failed to connectToTenantDB: %w", err)
-				}
-				defer tenantDB.Close()
-				cs := []CompetitionRow{}
-				if err := tenantDB.SelectContext(
-					ctx,
-					&cs,
-					"SELECT * FROM competition WHERE tenant_id=?",
-					t.ID,
-				); err != nil {
-					return fmt.Errorf("failed to Select competition: %w", err)
-				}
-				for _, comp := range cs {
-					report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
-					if err != nil {
-						return fmt.Errorf("failed to billingReportByCompetition: %w", err)
-					}
-					tb.BillingYen += report.BillingYen
-				}
-				if err != nil {
-					if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", tb.BillingYen, t.ID); err != nil {
-						return fmt.Errorf("error Update player: billing=%d, id=%d, %w", tb.BillingYen, t.ID, err)
-					}
-				}
-				return nil
-			}(t)
-			if err != nil {
-				fmt.Errorf("error Select tenant: %w", err)
-			}
-		}
-		time.Sleep(time.Second * 2)
+		return nil
+	}(t)
+	if err != nil {
+		fmt.Printf("error Select tenant: %w\n", err)
 	}
 }
 
@@ -1055,6 +1045,7 @@ func competitionFinishHandler(c echo.Context) error {
 			now, now, id, err,
 		)
 	}
+	go updateBilling(v.tenantID)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
 
