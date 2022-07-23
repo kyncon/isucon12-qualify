@@ -724,7 +724,7 @@ func updateBilling(tenantId int64) int64 {
 			fmt.Printf("failed to billingReportByCompetition: %v", err)
 		}
 		billingYen += report.BillingYen
-		fmt.Printf("billing calc:  %v", time.Now().Sub(start))
+		fmt.Printf("billing calc:  %v\n", time.Now().Sub(start))
 	}
 	start := time.Now()
 	if err != nil {
