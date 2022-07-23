@@ -696,6 +696,7 @@ func tenantsBillingHandler(c echo.Context) error {
 }
 
 func updateBilling(tenantId int64) {
+	fmt.Printf("update billing start\n")
 	ctx := context.Background()
 	var billingYen int64
 	tenantDB, err := connectToTenantDB(tenantId)
@@ -712,16 +713,17 @@ func updateBilling(tenantId int64) {
 	); err != nil {
 		fmt.Printf("failed to Select competition: %v", err)
 	}
-	start := time.Now()
+	fmt.Printf("select competition done: %d\n", len(cs))
 	for _, comp := range cs {
+		start := time.Now()
 		report, err := billingReportByCompetition(ctx, tenantDB, tenantId, comp.ID)
 		if err != nil {
 			fmt.Printf("failed to billingReportByCompetition: %v", err)
 		}
 		billingYen += report.BillingYen
+		fmt.Printf("billing calc:  %v", time.Now().Sub(start))
 	}
-	fmt.Printf("billing calc:  %v", time.Now().Sub(start))
-	start = time.Now()
+	start := time.Now()
 	if err != nil {
 		if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", billingYen, tenantId); err != nil {
 			fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYen, tenantId, err)
@@ -1711,7 +1713,6 @@ func initializeHandler(c echo.Context) error {
 }
 
 func completeBilling() error {
-	fmt.Print("completeBilling is start...\n")
 	ts := []TenantRow{}
 	if err := adminDB.Select(
 		&ts,
@@ -1719,7 +1720,6 @@ func completeBilling() error {
 	); err != nil {
 		return fmt.Errorf("failed to Select tenant: %w\n", err)
 	}
-	fmt.Printf("select tenant is done: %d \n", len(ts))
 	for _, t := range ts {
 		updateBilling(t.ID)
 	}
