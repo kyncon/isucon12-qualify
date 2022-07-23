@@ -1717,6 +1717,9 @@ func initializeHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
 	}
+	if err := completeBilling(); err != nil {
+		return fmt.Errorf("error completeBilling: %e", err)
+	}
 	res := InitializeHandlerResult{
 		Lang: "go",
 	}
@@ -1724,15 +1727,8 @@ func initializeHandler(c echo.Context) error {
 }
 
 func completeBilling() error {
-	ts := []TenantRow{}
-	if err := adminDB.Select(
-		&ts,
-		"SELECT * FROM tenant",
-	); err != nil {
-		return fmt.Errorf("failed to Select tenant: %w\n", err)
-	}
-	for _, t := range ts {
-		updateBilling(t.ID)
+	if _, err := adminDB.Exec("UPDATE tenant SET biling = 0"); err != nil {
+		return fmt.Errorf("failed to init tenant billing: %w\n", err)
 	}
 	return nil
 }
