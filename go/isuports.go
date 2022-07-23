@@ -727,10 +727,8 @@ func updateBilling(tenantId int64) int64 {
 		fmt.Printf("billing calc: %v, billingYen: %v\n", time.Now().Sub(start), billingYen)
 	}
 	start := time.Now()
-	if err != nil {
-		if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", billingYen, tenantId); err != nil {
-			fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYen, tenantId, err)
-		}
+	if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", billingYen, tenantId); err != nil {
+		fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYen, tenantId, err)
 	}
 	fmt.Printf("billing update: %v, billingYen: %v", time.Now().Sub(start), billingYen)
 	return billingYen
