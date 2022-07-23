@@ -28,7 +28,7 @@ mysql -u"$TENANT_DB_USER" \
   -p"$TENANT_DB_PASSWORD" \
   --host "$TENANT_DB_HOST" \
   --port "$TENANT_DB_PORT" \
-  $"TENANT_DB_NAME" < ./tenant/10_schema.sql
+  "$TENANT_DB_NAME" < ./tenant/10_schema.sql
 for db in $( ls ../../initial_data/*.db ); do
   mysql -u"$TENANT_DB_USER" \
     -p"$TENANT_DB_PASSWORD" \
