@@ -1320,7 +1320,7 @@ func playerHandler(c echo.Context) error {
 	}
 
 	competitionMap := make(map[string]CompetitionRow)
-	for _, c := range competitionMap {
+	for _, c := range cs {
 		competitionMap[c.ID] = c
 	}
 
