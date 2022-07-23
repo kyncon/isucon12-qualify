@@ -686,53 +686,32 @@ func tenantsBillingHandler(c echo.Context) error {
 
 func updateBilling(tenantId int64) {
 	ctx := context.Background()
-
-	t := TenantRow{}
-	if err := adminDB.GetContext(
+	var billingYen int64
+	tenantDB, err := connectToTenantDB(tenantId)
+	if err != nil {
+		fmt.Printf("failed to connectToTenantDB: %v", err)
+	}
+	defer tenantDB.Close()
+	cs := []CompetitionRow{}
+	if err := tenantDB.SelectContext(
 		ctx,
-		&t,
-		"SELECT * FROM tenant WHERE id=?",
+		&cs,
+		"SELECT * FROM competition WHERE tenant_id=?",
 		tenantId,
 	); err != nil {
-		fmt.Printf("failed to get tenant: %v\n", err)
-		return
+		fmt.Printf("failed to Select competition: %v", err)
 	}
-	err := func(t TenantRow) error {
-		tb := TenantWithBilling{
-			ID:          strconv.FormatInt(t.ID, 10),
-			Name:        t.Name,
-			DisplayName: t.DisplayName,
-		}
-		tenantDB, err := connectToTenantDB(t.ID)
+	for _, comp := range cs {
+		report, err := billingReportByCompetition(ctx, tenantDB, tenantId, comp.ID)
 		if err != nil {
-			return fmt.Errorf("failed to connectToTenantDB: %w", err)
+			fmt.Printf("failed to billingReportByCompetition: %v", err)
 		}
-		defer tenantDB.Close()
-		cs := []CompetitionRow{}
-		if err := tenantDB.SelectContext(
-			ctx,
-			&cs,
-			"SELECT * FROM competition WHERE tenant_id=?",
-			t.ID,
-		); err != nil {
-			return fmt.Errorf("failed to Select competition: %w", err)
-		}
-		for _, comp := range cs {
-			report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
-			if err != nil {
-				return fmt.Errorf("failed to billingReportByCompetition: %w", err)
-			}
-			tb.BillingYen += report.BillingYen
-		}
-		if err != nil {
-			if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", tb.BillingYen, t.ID); err != nil {
-				return fmt.Errorf("error Update player: billing=%d, id=%d, %w", tb.BillingYen, t.ID, err)
-			}
-		}
-		return nil
-	}(t)
+		billingYen += report.BillingYen
+	}
 	if err != nil {
-		fmt.Printf("error Select tenant: %v\n", err)
+		if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", billingYen, tenantId); err != nil {
+			fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYen, tenantId, err)
+		}
 	}
 }
 
