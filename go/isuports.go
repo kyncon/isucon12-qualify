@@ -691,7 +691,7 @@ func updateBilling(tenantId int64) {
 	if err := adminDB.SelectContext(
 		ctx,
 		&t,
-		"SELECT * FROM tenant WHERE tenant_id=?",
+		"SELECT * FROM tenant WHERE id=?",
 		tenantId,
 	); err != nil {
 		fmt.Printf("failed to Select competition: %v\n", err)
