@@ -9,7 +9,8 @@ NGINX_CONF:=$(APP_HOME)/nginx/nginx.conf
 NGINX_APP_CONF:=$(APP_HOME)/nginx/isuports.conf
 NGINX_LOG:=/var/log/nginx/access.log
 NGINX_ERR_LOG:=/var/log/nginx/error.log
-ALP_FORMAT:=/image/\w+,/posts/\d+,/@\w+
+ALP_FORMAT:=/api/organizer/player/\w+/disqualified,/api/organizer/competition/\w+/finish,/api/organizer/competition/\w+/score,/api/player/player/\w+,/api/player/competition/\w+/ranking
+
 
 # TODO: mysqlのコンフィグファイルの場所を指定する
 MYSQL_CONF:=$(APP_HOME)/mysql/mysqld.cnf
