@@ -724,7 +724,7 @@ func updateBilling(tenantId int64) int64 {
 			fmt.Printf("failed to billingReportByCompetition: %v", err)
 		}
 		billingYen += report.BillingYen
-		fmt.Printf("billing calc:  %v\n", time.Now().Sub(start))
+		fmt.Printf("billing calc: %v, billingYen: %v\n", time.Now().Sub(start), billingYen)
 	}
 	start := time.Now()
 	if err != nil {
@@ -732,7 +732,7 @@ func updateBilling(tenantId int64) int64 {
 			fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYen, tenantId, err)
 		}
 	}
-	fmt.Printf("billing update:  %v", time.Now().Sub(start))
+	fmt.Printf("billing update: %v, billingYen: %v", time.Now().Sub(start), billingYen)
 	return billingYen
 }
 
