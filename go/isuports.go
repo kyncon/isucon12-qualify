@@ -959,7 +959,7 @@ func competitionsAddHandler(c echo.Context) error {
 			id, v.tenantID, title, now, now, err,
 		)
 	}
-	go updateBillingWithCompetition(v.tenantID, id)
+	updateBilling(v.tenantID)
 
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
