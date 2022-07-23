@@ -57,7 +57,6 @@ stop-app:
 	sudo systemctl disable $(SYSTEMCTL_APP)
 
 build-nginx:
-	-sudo cp -f $(NGINX_LOG) /tmp/nginx_access_$(shell echo $(BRANCH) | sed -e "s@/@-@g")_latest.log
 	-sudo mv $(NGINX_LOG) /tmp/nginx_access_$(DATE).log
 	-sudo mv $(NGINX_ERR_LOG) /tmp/nginx_error_$(DATE).log
 	sudo cp $(NGINX_CONF) /etc/nginx/
@@ -93,9 +92,10 @@ log-nginx:
 	-[ -s $(NGINX_ERR_LOG) ] && sudo cat $(NGINX_ERR_LOG) | $(SLACKCAT_RAW_CMD)
 
 DEFAULT_BRANCH=$(shell git remote show origin | sed -n '/HEAD branch/s/.*: //p')
-LAST_MERGED_BRANCH=$(shell git log --first-parent $(DEFAULT_BRANCH) --oneline --merges --pretty=format:"%s" -1 | sed -e "s;Merge pull request \#[0-9]\{1,\} from kyncon/;;g" -e "s;/;-;g")
+LAST_MERGED_BRANCH=$(shell git log --first-parent origin/$(DEFAULT_BRANCH) --oneline --merges --pretty=format:"%s" -1 | sed -e "s;Merge pull request \#[0-9]\{1,\} from kyncon/;;g" -e "s;/;-;g")
 log-nginx-diff:
 	sudo alpdiff -m "$(ALP_FORMAT)" /tmp/nginx_access_$(LAST_MERGED_BRANCH)_latest.log $(NGINX_LOG) | $(SLACKCAT_RAW_CMD)
+	-sudo cp -f $(NGINX_LOG) /tmp/nginx_access_$(shell echo $(BRANCH) | sed -e "s@/@-@g")_latest.log
 
 log-mysql:
 	sudo mysqldumpslow -s t $(MYSQL_LOG) | $(SLACKCAT_RAW_CMD)
