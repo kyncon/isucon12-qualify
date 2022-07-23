@@ -93,7 +93,7 @@ log-nginx:
 	-[ -s $(NGINX_ERR_LOG) ] && sudo cat $(NGINX_ERR_LOG) | $(SLACKCAT_RAW_CMD)
 
 DEFAULT_BRANCH=$(shell git remote show origin | sed -n '/HEAD branch/s/.*: //p')
-LAST_MERGED_BRANCH=$(shell git log --first-parent $(DEFAULT_BRANCH) --oneline --merges --pretty=format:"%s" -1 | sed -e "s;Merge pull request \\\#[0-9]\{1,\} from kyncon/;;g" -e "s;/;-;g")
+LAST_MERGED_BRANCH=$(shell git log --first-parent $(DEFAULT_BRANCH) --oneline --merges --pretty=format:"%s" -1 | sed -e "s;Merge pull request \#[0-9]\{1,\} from kyncon/;;g" -e "s;/;-;g")
 log-nginx-diff:
 	sudo alpdiff -m "$(ALP_FORMAT)" /tmp/nginx_access_$(LAST_MERGED_BRANCH)_latest.log $(NGINX_LOG) | $(SLACKCAT_RAW_CMD)
 
