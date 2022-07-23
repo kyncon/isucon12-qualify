@@ -39,9 +39,9 @@ build:
 	$(SSH_COMMAND) $(SERVER3) 'cd $(APP_HOME) && source ~/.profile && git fetch -p && git checkout $(BRANCH) && git pull origin $(BRANCH) && make build-server3 BRANCH:=$(BRANCH)'
 
 # Set app, mysql and nginx.
-build-server1: build-app build-nginx build-mysql
+build-server1: build-app build-nginx
 build-server2: stop-app build-mysql
-build-server3: stop-app
+build-server3: stop-app build-mysql
 
 DATE=$(shell date '+%T')
 
