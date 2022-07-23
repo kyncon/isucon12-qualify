@@ -767,7 +767,7 @@ func updateBilling() {
 				fmt.Errorf("error Select tenant: %w", err)
 			}
 		}
-		return
+		time.Sleep(time.Second * 2)
 	}
 }
 
