@@ -10,6 +10,7 @@ CREATE TABLE `tenant` (
   `display_name` VARCHAR(255) NOT NULL,
   `created_at` BIGINT NOT NULL,
   `updated_at` BIGINT NOT NULL,
+  `billing` int default 0;
   PRIMARY KEY (`id`),
   UNIQUE KEY `name` (`name`)
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4;
