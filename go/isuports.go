@@ -1707,8 +1707,25 @@ func initializeHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
 	}
+	if err = completeBilling(); err != nil {
+		return fmt.Errorf("error complete billing: %e", err)
+	}
 	res := InitializeHandlerResult{
 		Lang: "go",
 	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+}
+
+func completeBilling() error {
+	ts := []TenantRow{}
+	if err := adminDB.Select(
+		&ts,
+		"SELECT * FROM tenant",
+	); err != nil {
+		return fmt.Errorf("failed to Select competition: %w\n", err)
+	}
+	for _, t := range ts {
+		updateBilling(t.ID)
+	}
+	return nil
 }
