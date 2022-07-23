@@ -1727,7 +1727,7 @@ func initializeHandler(c echo.Context) error {
 }
 
 func completeBilling() error {
-	if _, err := adminDB.Exec("UPDATE tenant SET biling = 0"); err != nil {
+	if _, err := adminDB.Exec("UPDATE tenant SET billing = 0"); err != nil {
 		return fmt.Errorf("failed to init tenant billing: %w\n", err)
 	}
 	return nil
