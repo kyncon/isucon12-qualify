@@ -51,7 +51,7 @@ func run(file string) error {
 
 	fmt.Println("statement, count, average")
 	for query, dataList := range dataList {
-		fmt.Printf("%s, %d, %f, %f", query, count(dataList), average(dataList))
+		fmt.Printf("%s, %d, %f\n", query, count(dataList), average(dataList))
 	}
 
 	return nil
