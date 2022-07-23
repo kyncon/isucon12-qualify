@@ -22,11 +22,11 @@ func main() {
 }
 
 type data struct {
-	Time         time.Time `json:"time"`
-	Statement    string    `json:"statement"`
-	Args         []string  `json:"args"`
-	QueryTime    float64   `json:"query_time"`
-	AffectedRows int       `json:"affected_rows"`
+	Time      time.Time `json:"time"`
+	Statement string    `json:"statement"`
+	// Args         []string  `json:"args"`
+	QueryTime    float64 `json:"query_time"`
+	AffectedRows int     `json:"affected_rows"`
 }
 
 func run(file string) error {
