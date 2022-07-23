@@ -694,7 +694,7 @@ func updateBilling(tenantId int64) {
 		"SELECT * FROM tenant WHERE tenant_id=?",
 		tenantId,
 	); err != nil {
-		fmt.Printf("failed to Select competition: %w\n", err)
+		fmt.Printf("failed to Select competition: %v\n", err)
 		return
 	}
 	err := func(t TenantRow) error {
@@ -732,7 +732,7 @@ func updateBilling(tenantId int64) {
 		return nil
 	}(t)
 	if err != nil {
-		fmt.Printf("error Select tenant: %w\n", err)
+		fmt.Printf("error Select tenant: %v\n", err)
 	}
 }
 
