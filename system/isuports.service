@@ -13,3 +13,4 @@ WorkingDirectory=/home/isucon/webapp/go
 ExecStart=/home/isucon/webapp/go/isuports
 Restart=always
 EnvironmentFile=/home/isucon/env.sh
+LimitNOFILE=32768
