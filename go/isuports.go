@@ -1270,7 +1270,9 @@ func playerHandler(c echo.Context) error {
 		}
 		return fmt.Errorf("error retrievePlayer: %w", err)
 	}
+
 	cs := []CompetitionRow{}
+	// tenantの全てのCompetitionを取り出す
 	if err := tenantDB.SelectContext(
 		ctx,
 		&cs,
@@ -1281,6 +1283,7 @@ func playerHandler(c echo.Context) error {
 	}
 
 	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
+	// file 自体をLock
 	fl, err := flockByTenantID(v.tenantID)
 	if err != nil {
 		return fmt.Errorf("error flockByTenantID: %w", err)
@@ -1305,6 +1308,7 @@ func playerHandler(c echo.Context) error {
 		return err
 	}
 	var psrs []PlayerScoreRow
+	// player のスコアを取得
 	if err := tenantDB.SelectContext(ctx, &psrs, query, args...); err != nil {
 		return fmt.Errorf("error Select player score: id in %v, %w", cIds, err)
 	}
@@ -1329,11 +1333,17 @@ func playerHandler(c echo.Context) error {
 		}
 	}
 
+	competitionMap := make(map[string]CompetitionRow)
+	for _, c := range cs {
+		competitionMap[c.ID] = c
+	}
+
 	psds := make([]PlayerScoreDetail, 0, len(pss))
 	for _, ps := range pss {
-		comp, err := retrieveCompetition(ctx, tenantDB, ps.CompetitionID)
-		if err != nil {
-			return fmt.Errorf("error retrieveCompetition: %w", err)
+		comp, ok := competitionMap[ps.CompetitionID]
+		if ok != true {
+			fmt.Printf("competitionID: %v, competitionMap:%v", ps.CompetitionID, competitionMap)
+			return fmt.Errorf("error retrieveCompetition")
 		}
 		psds = append(psds, PlayerScoreDetail{
 			CompetitionTitle: comp.Title,
