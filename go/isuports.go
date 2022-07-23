@@ -1715,7 +1715,7 @@ type InitializeHandlerResult struct {
 func initializeHandler(c echo.Context) error {
 	c.Logger().Info("Initialized")
 	if os.Getenv("MASTER") != "" {
-		_, err := http.NewRequest("POST", "192.168.0.13:3000/initialize", nil)
+		_, err := http.NewRequest("POST", "http://192.168.0.13:3000/initialize", nil)
 		if err != nil {
 			fmt.Println(err)
 		}
