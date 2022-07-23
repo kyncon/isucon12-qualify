@@ -1391,7 +1391,7 @@ func competitionRankingHandler(c echo.Context) error {
 	if err := adminDB.GetContext(
 		ctx,
 		&vhr,
-		"SELECT * from visit_history WHERE player_id = ? tenant_id = ? competition_id = ? LIMIT 1",
+		"SELECT * from visit_history WHERE player_id = ? AND tenant_id = ? AND competition_id = ? LIMIT 1",
 		v.playerID, v.tenantID, competitionID,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
