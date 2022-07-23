@@ -506,10 +506,11 @@ func tenantsAddHandler(c echo.Context) error {
 	if err := createTenantDB(id); err != nil {
 		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
 	}
-	_, err = http.NewRequest("POST", fmt.Sprintf("http://192.168.0.13:3000/api/local/tenants/add?id=%d", id), nil)
+	res, err := http.NewRequest("POST", fmt.Sprintf("http://192.168.0.13:3000/api/local/tenants/add?id=%d", id), nil)
 	if err != nil {
 		return fmt.Errorf("Cannot create tenant DB: %w", err)
 	}
+	defer res.Close()
 
 	res := TenantsAddHandlerResult{
 		Tenant: TenantWithBilling{
@@ -1732,10 +1733,11 @@ type InitializeHandlerResult struct {
 func initializeHandler(c echo.Context) error {
 	c.Logger().Info("Initialized")
 	if os.Getenv("MASTER") != "" {
-		_, err := http.NewRequest("POST", "http://192.168.0.13:3000/initialize", nil)
+		res, err := http.NewRequest("POST", "http://192.168.0.13:3000/initialize", nil)
 		if err != nil {
 			fmt.Println(err)
 		}
+		defer res.Close()
 	}
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
