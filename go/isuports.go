@@ -443,12 +443,12 @@ type TenantsAddHandlerResult struct {
 }
 
 func tenantsLocalAddHandler(c echo.Context) error {
-	id, err := strings.Atoi(c.QueryParam("id"))
+	id, err := strconv.Atoi(c.QueryParam("id"))
 	if err != nil {
 		return err
 	}
 
-	if err := createTenantDB(id); err != nil {
+	if err := createTenantDB(int64(id)); err != nil {
 		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, err)
 	}
 	return nil
