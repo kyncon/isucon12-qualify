@@ -103,4 +103,4 @@ log-mysql:
 
 .PHONY: check
 check:
-	$(SSH_COMMAND) $(SERVER1) journalctl -u $(SYSTEMCTL_APP)
+	$(SSH_COMMAND) $(SERVER1) journalctl -e -u $(SYSTEMCTL_APP)
