@@ -1271,7 +1271,6 @@ func playerHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error flockByTenantID: %w", err)
 	}
-	defer fl.Close()
 
 	// competitionのIDsを取得
 	cIds := make([]string, 0, len(cs))
@@ -1294,6 +1293,10 @@ func playerHandler(c echo.Context) error {
 	if err := tenantDB.SelectContext(ctx, &psrs, query, args...); err != nil {
 		return fmt.Errorf("error Select player score: id in %v, %w", cIds, err)
 	}
+
+	// 先にlockを開放
+	fl.Close()
+
 	// row_numが一番大きいものだけを取り出す
 	compe2PsMap := make(map[string]PlayerScoreRow, len(cs))
 	for _, ps := range psrs {
