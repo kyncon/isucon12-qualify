@@ -78,8 +78,8 @@ log:
 
 # Send log to slack
 # Set log-nginx or log-mysql.
-log-server1: echo-branch log-app log-mysql log-nginx log-nginx-diff
-log-server2:
+log-server1: echo-branch log-app log-nginx log-nginx-diff
+log-server2: log-mysql
 log-server3:
 
 echo-branch:
