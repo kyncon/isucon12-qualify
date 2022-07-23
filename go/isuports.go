@@ -1713,6 +1713,12 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
+	if os.Getenv("MASTER") != "" {
+		_, err := http.NewRequest("POST", "192.168.0.13:3000", nil)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
