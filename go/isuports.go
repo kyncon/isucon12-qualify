@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -47,6 +48,8 @@ var (
 	adminDB *sqlx.DB
 
 	sqliteDriverName = "sqlite3"
+
+	tenantIdToUpdateCacher *IntCacher
 )
 
 // 環境変数を取得する、なければデフォルト値を返す
@@ -123,6 +126,44 @@ func dispenseID(ctx context.Context) (string, error) {
 	return "", lastErr
 }
 
+type IntCacher struct {
+	mu   sync.RWMutex
+	data map[int64]int64
+}
+
+func NewIntCacher() *IntCacher {
+	return &IntCacher{mu: sync.RWMutex{}, data: make(map[int64]int64)}
+}
+
+func (s *IntCacher) Get(key int64) (int64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res, ok := s.data[key]
+	return res, ok
+}
+
+func (s *IntCacher) Keys() []int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	keys := make([]int64, 0, len(s.data))
+	for k := range s.data {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func (s *IntCacher) Put(key int64, value int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[key] = value
+}
+
+func (s *IntCacher) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data = make(map[int64]int64)
+}
+
 // 全APIにCache-Control: privateを設定する
 func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
@@ -192,6 +233,7 @@ func Run() {
 	adminDB.SetMaxOpenConns(10)
 	defer adminDB.Close()
 
+	tenantIdToUpdateCacher = NewIntCacher()
 	go updateBilling()
 
 	port := getEnv("SERVER_APP_PORT", "3000")
@@ -692,9 +734,19 @@ func tenantsBillingHandler(c echo.Context) error {
 func updateBilling() {
 	for {
 		ctx := context.Background()
+
+		tenantIds := tenantIdToUpdateCacher.Keys()
 		ts := []TenantRow{}
-		if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant"); err != nil {
-			fmt.Errorf("error Select tenant: %w", err)
+		if len(tenantIds) != 0 {
+			orgQuery := "SELECT * FROM `tenant` WHERE id IN (?)"
+			query, args, err := sqlx.In(orgQuery, tenantIds)
+			if err != nil {
+				return
+			}
+			err = adminDB.Select(&ts, query, args...)
+			if err != nil {
+				return
+			}
 		}
 		for _, t := range ts {
 			err := func(t TenantRow) error {
@@ -1148,6 +1200,8 @@ func competitionScoreHandler(c echo.Context) error {
 		}
 	}
 
+	tenantIdToUpdateCacher.Put(v.tenantID, v.tenantID)
+
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
 		Data:   ScoreHandlerResult{Rows: int64(len(playerScoreRows))},
@@ -1378,6 +1432,8 @@ func competitionRankingHandler(c echo.Context) error {
 			v.playerID, tenant.ID, competitionID, now, now, err,
 		)
 	}
+
+	tenantIdToUpdateCacher.Put(tenant.ID, tenant.ID)
 
 	var rankAfter int64
 	rankAfterStr := c.QueryParam("rank_after")
