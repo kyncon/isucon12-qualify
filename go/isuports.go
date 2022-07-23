@@ -701,6 +701,7 @@ func updateBilling(tenantId int64) {
 	); err != nil {
 		fmt.Printf("failed to Select competition: %v", err)
 	}
+	start := time.Now()
 	for _, comp := range cs {
 		report, err := billingReportByCompetition(ctx, tenantDB, tenantId, comp.ID)
 		if err != nil {
@@ -708,11 +709,14 @@ func updateBilling(tenantId int64) {
 		}
 		billingYen += report.BillingYen
 	}
+	fmt.Printf("billing calc:  %v", time.Now().Sub(start))
+	start = time.Now()
 	if err != nil {
 		if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", billingYen, tenantId); err != nil {
 			fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYen, tenantId, err)
 		}
 	}
+	fmt.Printf("billing update:  %v", time.Now().Sub(start))
 }
 
 type PlayerDetail struct {
