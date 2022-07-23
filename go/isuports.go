@@ -914,7 +914,7 @@ func competitionsAddHandler(c echo.Context) error {
 
 	title := c.FormValue("title")
 
-	now := time.Now().Unix()
+	now := time.Now().UnixMicro()
 	id, err := dispenseID(ctx)
 	if err != nil {
 		return fmt.Errorf("error dispenseID: %w", err)
