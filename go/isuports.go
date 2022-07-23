@@ -699,7 +699,6 @@ func tenantsBillingHandler(c echo.Context) error {
 }
 
 func updateBilling(tenantId int64) int64 {
-	fmt.Printf("update billing start\n")
 	ctx := context.Background()
 	var billingYen int64
 	tenantDB, err := connectToTenantDB(tenantId)
@@ -716,22 +715,34 @@ func updateBilling(tenantId int64) int64 {
 	); err != nil {
 		fmt.Printf("failed to Select competition: %v", err)
 	}
-	fmt.Printf("select competition done: %d\n", len(cs))
 	for _, comp := range cs {
-		start := time.Now()
 		report, err := billingReportByCompetition(ctx, tenantDB, tenantId, comp.ID)
 		if err != nil {
 			fmt.Printf("failed to billingReportByCompetition: %v", err)
 		}
 		billingYen += report.BillingYen
-		fmt.Printf("billing calc: %v, billingYen: %v\n", time.Now().Sub(start), billingYen)
 	}
-	start := time.Now()
 	if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", billingYen, tenantId); err != nil {
 		fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYen, tenantId, err)
 	}
-	fmt.Printf("billing update: %v, billingYen: %v", time.Now().Sub(start), billingYen)
 	return billingYen
+}
+
+func updateBillingWithCompetition(tenantId int64, competitionId string) {
+	ctx := context.Background()
+	tenantDB, err := connectToTenantDB(tenantId)
+	if err != nil {
+		fmt.Printf("failed to connectToTenantDB: %v", err)
+	}
+	defer tenantDB.Close()
+	report, err := billingReportByCompetition(ctx, tenantDB, tenantId, competitionId)
+	if err != nil {
+		fmt.Printf("failed to billingReportByCompetition: %v", err)
+	}
+	billingYenToAdd := report.BillingYen
+	if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = billing + ? WHERE id = ?", billingYenToAdd, tenantId); err != nil {
+		fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYenToAdd, tenantId, err)
+	}
 }
 
 type PlayerDetail struct {
@@ -948,7 +959,7 @@ func competitionsAddHandler(c echo.Context) error {
 			id, v.tenantID, title, now, now, err,
 		)
 	}
-	go updateBilling(v.tenantID)
+	go updateBillingWithCompetition(v.tenantID, id)
 
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
