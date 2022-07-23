@@ -99,6 +99,7 @@ func createTenantDB(id int64) error {
 
 // システム全体で一意なIDを生成する
 func dispenseID(ctx context.Context) (string, error) {
+	time.Sleep(time.Microsecond)
 	return fmt.Sprintf("%x", time.Now().UnixMicro()), nil
 }
 
