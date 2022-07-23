@@ -329,6 +329,7 @@ type TenantRow struct {
 	ID          int64  `db:"id"`
 	Name        string `db:"name"`
 	DisplayName string `db:"display_name"`
+	Billing     int64  `db:"billing"`
 	CreatedAt   int64  `db:"created_at"`
 	UpdatedAt   int64  `db:"updated_at"`
 }
@@ -678,45 +679,16 @@ func tenantsBillingHandler(c echo.Context) error {
 	}
 	tenantBillings := make([]TenantWithBilling, 0, len(ts))
 	for _, t := range ts {
-		if beforeID != 0 && beforeID <= t.ID {
-			continue
+		tb := TenantWithBilling{
+			ID:          strconv.FormatInt(t.ID, 10),
+			Name:        t.Name,
+			DisplayName: t.DisplayName,
+			BillingYen:  t.Billing,
 		}
-		err := func(t TenantRow) error {
-			tb := TenantWithBilling{
-				ID:          strconv.FormatInt(t.ID, 10),
-				Name:        t.Name,
-				DisplayName: t.DisplayName,
-			}
-			tenantDB, err := connectToTenantDB(t.ID)
-			if err != nil {
-				return fmt.Errorf("failed to connectToTenantDB: %w", err)
-			}
-			defer tenantDB.Close()
-			cs := []CompetitionRow{}
-			if err := tenantDB.SelectContext(
-				ctx,
-				&cs,
-				"SELECT * FROM competition WHERE tenant_id=?",
-				t.ID,
-			); err != nil {
-				return fmt.Errorf("failed to Select competition: %w", err)
-			}
-			for _, comp := range cs {
-				report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
-				if err != nil {
-					return fmt.Errorf("failed to billingReportByCompetition: %w", err)
-				}
-				tb.BillingYen += report.BillingYen
-			}
-			tenantBillings = append(tenantBillings, tb)
-			return nil
-		}(t)
-		if err != nil {
-			return err
+		if tb.BillingYen == 0 {
+			tb.BillingYen = updateBilling(t.ID)
 		}
-		if len(tenantBillings) >= 10 {
-			break
-		}
+		tenantBillings = append(tenantBillings, tb)
 	}
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
@@ -724,6 +696,53 @@ func tenantsBillingHandler(c echo.Context) error {
 			Tenants: tenantBillings,
 		},
 	})
+}
+
+func updateBilling(tenantId int64) int64 {
+	ctx := context.Background()
+	var billingYen int64
+	tenantDB, err := connectToTenantDB(tenantId)
+	if err != nil {
+		fmt.Printf("failed to connectToTenantDB: %v", err)
+	}
+	defer tenantDB.Close()
+	cs := []CompetitionRow{}
+	if err := tenantDB.SelectContext(
+		ctx,
+		&cs,
+		"SELECT * FROM competition WHERE tenant_id=?",
+		tenantId,
+	); err != nil {
+		fmt.Printf("failed to Select competition: %v", err)
+	}
+	for _, comp := range cs {
+		report, err := billingReportByCompetition(ctx, tenantDB, tenantId, comp.ID)
+		if err != nil {
+			fmt.Printf("failed to billingReportByCompetition: %v", err)
+		}
+		billingYen += report.BillingYen
+	}
+	if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", billingYen, tenantId); err != nil {
+		fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYen, tenantId, err)
+	}
+	return billingYen
+}
+
+func updateBillingWithCompetition(tenantId int64, competitionId string) {
+	ctx := context.Background()
+	tenantDB, err := connectToTenantDB(tenantId)
+	if err != nil {
+		fmt.Printf("failed to connectToTenantDB: %v", err)
+	}
+	defer tenantDB.Close()
+	report, err := billingReportByCompetition(ctx, tenantDB, tenantId, competitionId)
+	if err != nil {
+		fmt.Printf("failed to billingReportByCompetition: %v", err)
+	}
+	billingYenToAdd := report.BillingYen
+	if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = billing + ? WHERE id = ?", billingYenToAdd, tenantId); err != nil {
+		fmt.Printf("error Update player: billing=%d, id=%d, %v", billingYenToAdd, tenantId, err)
+	}
 }
 
 type PlayerDetail struct {
@@ -993,6 +1012,8 @@ func competitionFinishHandler(c echo.Context) error {
 			now, now, id, err,
 		)
 	}
+
+	go updateBilling(v.tenantID)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
 
@@ -1696,8 +1717,18 @@ func initializeHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
 	}
+	if err := completeBilling(); err != nil {
+		return fmt.Errorf("error completeBilling: %e", err)
+	}
 	res := InitializeHandlerResult{
 		Lang: "go",
 	}
 	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+}
+
+func completeBilling() error {
+	if _, err := adminDB.Exec("UPDATE tenant SET billing = 0"); err != nil {
+		return fmt.Errorf("failed to init tenant billing: %w\n", err)
+	}
+	return nil
 }
