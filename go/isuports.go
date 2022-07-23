@@ -1261,25 +1261,47 @@ func playerHandler(c echo.Context) error {
 		return fmt.Errorf("error flockByTenantID: %w", err)
 	}
 	defer fl.Close()
+
+	// competitionのIDsを取得
+	cIds := make([]string, 0, len(cs))
+	for _, c := range cs {
+		cIds = append(cIds, c.ID)
+	}
+	if len(cIds) == 0 {
+		return fmt.Errorf("cids len = 0")
+	}
+	orgQuery := fmt.Sprintf(
+		"SELECT * FROM player_score WHERE tenant_id = '%d' AND player_id = '%s' AND competition_id IN (?) ORDER BY row_num",
+		v.tenantID,
+		p.ID,
+	)
+	query, args, err := sqlx.In(orgQuery, cIds)
+	if err != nil {
+		return err
+	}
+	var psrs []PlayerScoreRow
+	if err := tenantDB.SelectContext(ctx, &psrs, query, args...); err != nil {
+		return fmt.Errorf("error Select player score: id in %v, %w", cIds, err)
+	}
+	// row_numが一番大きいものだけを取り出す
+	compe2PsMap := make(map[string]PlayerScoreRow, len(cs))
+	for _, ps := range psrs {
+		if v, ok := compe2PsMap[ps.CompetitionID]; ok {
+			// 比較
+			if v.RowNum < ps.RowNum {
+				compe2PsMap[ps.CompetitionID] = ps
+			}
+		} else {
+			// init
+			compe2PsMap[ps.CompetitionID] = ps
+		}
+	}
+
 	pss := make([]PlayerScoreRow, 0, len(cs))
 	for _, c := range cs {
-		ps := PlayerScoreRow{}
-		if err := tenantDB.GetContext(
-			ctx,
-			&ps,
-			// 最後にCSVに登場したスコアを採用する = row_numが一番大きいもの
-			"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? AND player_id = ? ORDER BY row_num DESC LIMIT 1",
-			v.tenantID,
-			c.ID,
-			p.ID,
-		); err != nil {
-			// 行がない = スコアが記録されてない
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, playerID=%s, %w", v.tenantID, c.ID, p.ID, err)
+		if ps, ok := compe2PsMap[c.ID]; ok {
+			pss = append(pss, ps)
 		}
-		pss = append(pss, ps)
 	}
 
 	psds := make([]PlayerScoreDetail, 0, len(pss))
