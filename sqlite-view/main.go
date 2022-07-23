@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"sort"
 	"time"
 )
 
@@ -46,15 +48,35 @@ func run(file string) error {
 		if err != nil {
 			return err
 		}
-		dataList[d.Statement] = append(dataList[d.Statement], d)
+		dataList[parseQuery(d.Statement)] = append(dataList[d.Statement], d)
 	}
 
 	fmt.Println("statement, count, average")
+	type result struct {
+		query   string
+		count   int
+		average float64
+	}
+	results := make([]result, 0, len(dataList))
 	for query, dataList := range dataList {
-		fmt.Printf("%s, %d, %f\n", query, count(dataList), average(dataList))
+		results = append(results, result{
+			query:   query,
+			count:   count(dataList),
+			average: average(dataList),
+		})
 	}
 
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].average > results[j].average
+	})
+
 	return nil
+}
+
+var re = regexp.MustCompile("\((?, )*\)")
+
+func parseQuery(query string) string {
+	return string(re.ReplaceAll([]byte(query), []byte("(?)")))
 }
 
 func average(dataList []data) float64 {
