@@ -506,13 +506,14 @@ func tenantsAddHandler(c echo.Context) error {
 	if err := createTenantDB(id); err != nil {
 		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
 	}
+	c.Logger().Info("curl api/local/tenants/add?id=", id)
 	res, err := http.NewRequest("POST", fmt.Sprintf("http://192.168.0.13:3000/api/local/tenants/add?id=%d", id), nil)
 	if err != nil {
 		return fmt.Errorf("Cannot create tenant DB: %w", err)
 	}
-	defer res.Close()
+	defer res.Body.Close()
 
-	res := TenantsAddHandlerResult{
+	resp := TenantsAddHandlerResult{
 		Tenant: TenantWithBilling{
 			ID:          strconv.FormatInt(id, 10),
 			Name:        name,
@@ -520,7 +521,7 @@ func tenantsAddHandler(c echo.Context) error {
 			BillingYen:  0,
 		},
 	}
-	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: resp})
 }
 
 // テナント名が規則に沿っているかチェックする
@@ -1737,7 +1738,7 @@ func initializeHandler(c echo.Context) error {
 		if err != nil {
 			fmt.Println(err)
 		}
-		defer res.Close()
+		defer res.Body.Close()
 	}
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
