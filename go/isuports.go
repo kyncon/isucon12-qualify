@@ -449,7 +449,7 @@ func tenantsLocalAddHandler(c echo.Context) error {
 	}
 
 	if err := createTenantDB(int64(id)); err != nil {
-		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, err)
+		return fmt.Errorf("error createTenantDB: id=%d %w", id, err)
 	}
 	return nil
 }
