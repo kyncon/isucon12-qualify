@@ -194,6 +194,8 @@ func Run() {
 	adminDB.SetMaxOpenConns(10)
 	defer adminDB.Close()
 
+	go updateBilling()
+
 	port := getEnv("SERVER_APP_PORT", "3000")
 	e.Logger.Infof("starting isuports server on : %s ...", port)
 	serverPort := fmt.Sprintf(":%s", port)
@@ -350,6 +352,7 @@ type TenantRow struct {
 	ID          int64  `db:"id"`
 	Name        string `db:"name"`
 	DisplayName string `db:"display_name"`
+	Billing     int64  `db:"billing"`
 	CreatedAt   int64  `db:"created_at"`
 	UpdatedAt   int64  `db:"updated_at"`
 }
@@ -510,6 +513,7 @@ func tenantsAddHandler(c echo.Context) error {
 	// NOTE: 先にadminDBに書き込まれることでこのAPIの処理中に
 	//       /api/admin/tenants/billingにアクセスされるとエラーになりそう
 	//       ロックなどで対処したほうが良さそう
+	// NOTE: TenantごとにDBを作成している
 	if err := createTenantDB(id); err != nil {
 		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
 	}
@@ -734,6 +738,55 @@ func tenantsBillingHandler(c echo.Context) error {
 			Tenants: tenantBillings,
 		},
 	})
+}
+
+func updateBilling() {
+	ctx := context.Background()
+	ts := []TenantRow{}
+	if err := adminDB.SelectContext(ctx, &ts, "SELECT * FROM tenant"); err != nil {
+		fmt.Errorf("error Select tenant: %w", err)
+		return
+	}
+	for _, t := range ts {
+		err := func(t TenantRow) error {
+			tb := TenantWithBilling{
+				ID:          strconv.FormatInt(t.ID, 10),
+				Name:        t.Name,
+				DisplayName: t.DisplayName,
+			}
+			tenantDB, err := connectToTenantDB(t.ID)
+			if err != nil {
+				return fmt.Errorf("failed to connectToTenantDB: %w", err)
+			}
+			defer tenantDB.Close()
+			cs := []CompetitionRow{}
+			if err := tenantDB.SelectContext(
+				ctx,
+				&cs,
+				"SELECT * FROM competition WHERE tenant_id=?",
+				t.ID,
+			); err != nil {
+				return fmt.Errorf("failed to Select competition: %w", err)
+			}
+			for _, comp := range cs {
+				report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
+				if err != nil {
+					return fmt.Errorf("failed to billingReportByCompetition: %w", err)
+				}
+				tb.BillingYen += report.BillingYen
+			}
+			if err != nil {
+				if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", tb.BillingYen, t.ID); err != nil {
+					return fmt.Errorf("error Update player: billing=%d, id=%d, %w", tb.BillingYen, t.ID, err)
+				}
+			}
+			return nil
+		}(t)
+		if err != nil {
+			fmt.Errorf("error Select tenant: %w", err)
+		}
+	}
+	return
 }
 
 type PlayerDetail struct {
