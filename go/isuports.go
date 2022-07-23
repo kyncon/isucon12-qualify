@@ -1722,7 +1722,7 @@ func completeBilling() error {
 		&ts,
 		"SELECT * FROM tenant",
 	); err != nil {
-		return fmt.Errorf("failed to Select competition: %w\n", err)
+		return fmt.Errorf("failed to Select tenant: %w\n", err)
 	}
 	for _, t := range ts {
 		updateBilling(t.ID)
