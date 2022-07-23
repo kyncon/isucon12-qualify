@@ -1714,7 +1714,7 @@ type InitializeHandlerResult struct {
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
 	if os.Getenv("MASTER") != "" {
-		_, err := http.NewRequest("POST", "192.168.0.13:3000", nil)
+		_, err := http.NewRequest("POST", "192.168.0.13:3000/initialize", nil)
 		if err != nil {
 			fmt.Println(err)
 		}
