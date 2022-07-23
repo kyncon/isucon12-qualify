@@ -46,7 +46,7 @@ build-server3: stop-app
 DATE=$(shell date '+%T')
 
 build-app:
-	rm /home/isucon/sqlite.log
+	-rm /home/isucon/sqlite.log
 	sudo systemctl stop $(SYSTEMCTL_APP)
 	cd $(APP_DIRECTORY) && $(APP_BUILD_COMMAND)
 	sudo cp $(APP_HOME)/system/isuports.service /etc/systemd/system/
