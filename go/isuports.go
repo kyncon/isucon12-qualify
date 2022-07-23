@@ -170,7 +170,7 @@ func Run() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	adminDB.SetMaxOpenConns(10)
+	adminDB.SetMaxOpenConns(1000)
 	defer adminDB.Close()
 
 	port := getEnv("SERVER_APP_PORT", "3000")
@@ -543,23 +543,34 @@ func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID i
 	}
 
 	// ランキングにアクセスした参加者のIDを取得する
-	vhs := []VisitHistorySummaryRow{}
+	vhs := []VisitHistoryRow{}
 	if err := adminDB.SelectContext(
 		ctx,
 		&vhs,
-		"SELECT player_id, MIN(created_at) AS min_created_at FROM visit_history WHERE tenant_id = ? AND competition_id = ? GROUP BY player_id",
+		"SELECT * FROM visit_history WHERE tenant_id = ? AND competition_id = ?",
 		tenantID,
 		comp.ID,
 	); err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("error Select visit_history: tenantID=%d, competitionID=%s, %w", tenantID, comp.ID, err)
 	}
-	billingMap := map[string]string{}
+	// playerごとにcreated_atが一番小さいものだけに絞る
+	minVhs := make(map[string]VisitHistoryRow, len(vhs))
 	for _, vh := range vhs {
+		if v, ok := minVhs[vh.PlayerID]; ok {
+			if v.CreatedAt > vh.CreatedAt {
+				minVhs[vh.PlayerID] = vh
+			}
+		} else {
+			minVhs[vh.PlayerID] = vh
+		}
+	}
+	billingMap := map[string]string{}
+	for _, mvh := range minVhs {
 		// competition.finished_atよりもあとの場合は、終了後に訪問したとみなして大会開催内アクセス済みとみなさない
-		if comp.FinishedAt.Valid && comp.FinishedAt.Int64 < vh.MinCreatedAt {
+		if comp.FinishedAt.Valid && comp.FinishedAt.Int64 < mvh.CreatedAt {
 			continue
 		}
-		billingMap[vh.PlayerID] = "visitor"
+		billingMap[mvh.PlayerID] = "visitor"
 	}
 
 	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
