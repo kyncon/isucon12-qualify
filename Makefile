@@ -39,8 +39,8 @@ build:
 
 # Set app, mysql and nginx.
 build-server1: build-app build-nginx build-mysql
-build-server2: build-app
-build-server3: build-app
+build-server2: stop-app build-mysql
+build-server3: stop-app
 
 DATE=$(shell date '+%T')
 
@@ -48,6 +48,10 @@ build-app:
 	sudo systemctl stop $(SYSTEMCTL_APP)
 	cd $(APP_DIRECTORY) && $(APP_BUILD_COMMAND)
 	sudo systemctl restart $(SYSTEMCTL_APP)
+
+stop-app:
+	sudo systemctl stop $(SYSTEMCTL_APP)
+	sudo systemctl disable $(SYSTEMCTL_APP)
 
 build-nginx:
 	-sudo cp -f $(NGINX_LOG) /tmp/nginx_access_$(shell echo $(BRANCH) | sed -e "s@/@-@g")_latest.log
