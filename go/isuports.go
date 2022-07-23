@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -102,6 +103,44 @@ func dispenseID(ctx context.Context) (string, error) {
 	return fmt.Sprintf("%x", time.Now().UnixMicro()), nil
 }
 
+type IntCacher struct {
+	mu   sync.RWMutex
+	data map[int64]int64
+}
+
+func NewIntCacher() *IntCacher {
+	return &IntCacher{mu: sync.RWMutex{}, data: make(map[int64]int64)}
+}
+
+func (s *IntCacher) Get(key int64) (int64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res, ok := s.data[key]
+	return res, ok
+}
+
+func (s *IntCacher) Keys() []int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	keys := make([]int64, 0, len(s.data))
+	for k := range s.data {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func (s *IntCacher) Put(key int64, value int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data[key] = value
+}
+
+func (s *IntCacher) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data = make(map[int64]int64)
+}
+
 // 全APIにCache-Control: privateを設定する
 func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
@@ -112,10 +151,8 @@ func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 
 // Run は cmd/isuports/main.go から呼ばれるエントリーポイントです
 func Run() {
-	initProfiler()
-
 	e := echo.New()
-	e.Debug = false
+	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
 
 	var (
@@ -132,7 +169,7 @@ func Run() {
 	}
 	defer sqlLogger.Close()
 
-	// e.Use(middleware.Logger())
+	e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(SetCacheControlPrivate)
 
@@ -329,6 +366,7 @@ type TenantRow struct {
 	ID          int64  `db:"id"`
 	Name        string `db:"name"`
 	DisplayName string `db:"display_name"`
+	Billing     int64  `db:"billing"`
 	CreatedAt   int64  `db:"created_at"`
 	UpdatedAt   int64  `db:"updated_at"`
 }
@@ -355,23 +393,6 @@ func retrievePlayer(ctx context.Context, tenantDB dbOrTx, id string) (*PlayerRow
 		return nil, fmt.Errorf("error Select player: id=%s, %w", id, err)
 	}
 	return &p, nil
-}
-
-// 参加者を一括取得する
-func retrievePlayers(ctx context.Context, tenantDB dbOrTx, ids []string) (*[]PlayerRow, error) {
-	if len(ids) == 0 {
-		return nil, fmt.Errorf("ids len = 0")
-	}
-	orgQuery := "SELECT * FROM `player` WHERE id IN (?)"
-	query, args, err := sqlx.In(orgQuery, ids)
-	if err != nil {
-		return nil, err
-	}
-	var ps []PlayerRow
-	if err := tenantDB.SelectContext(ctx, &ps, query, args...); err != nil {
-		return nil, fmt.Errorf("error Select player: id in %v, %w", ids, err)
-	}
-	return &ps, nil
 }
 
 // 参加者を認可する
@@ -489,6 +510,7 @@ func tenantsAddHandler(c echo.Context) error {
 	// NOTE: 先にadminDBに書き込まれることでこのAPIの処理中に
 	//       /api/admin/tenants/billingにアクセスされるとエラーになりそう
 	//       ロックなどで対処したほうが良さそう
+	// NOTE: TenantごとにDBを作成している
 	if err := createTenantDB(id); err != nil {
 		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
 	}
@@ -667,45 +689,13 @@ func tenantsBillingHandler(c echo.Context) error {
 	}
 	tenantBillings := make([]TenantWithBilling, 0, len(ts))
 	for _, t := range ts {
-		if beforeID != 0 && beforeID <= t.ID {
-			continue
+		tb := TenantWithBilling{
+			ID:          strconv.FormatInt(t.ID, 10),
+			Name:        t.Name,
+			DisplayName: t.DisplayName,
+			BillingYen:  t.Billing,
 		}
-		err := func(t TenantRow) error {
-			tb := TenantWithBilling{
-				ID:          strconv.FormatInt(t.ID, 10),
-				Name:        t.Name,
-				DisplayName: t.DisplayName,
-			}
-			tenantDB, err := connectToTenantDB(t.ID)
-			if err != nil {
-				return fmt.Errorf("failed to connectToTenantDB: %w", err)
-			}
-			defer tenantDB.Close()
-			cs := []CompetitionRow{}
-			if err := tenantDB.SelectContext(
-				ctx,
-				&cs,
-				"SELECT * FROM competition WHERE tenant_id=?",
-				t.ID,
-			); err != nil {
-				return fmt.Errorf("failed to Select competition: %w", err)
-			}
-			for _, comp := range cs {
-				report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
-				if err != nil {
-					return fmt.Errorf("failed to billingReportByCompetition: %w", err)
-				}
-				tb.BillingYen += report.BillingYen
-			}
-			tenantBillings = append(tenantBillings, tb)
-			return nil
-		}(t)
-		if err != nil {
-			return err
-		}
-		if len(tenantBillings) >= 10 {
-			break
-		}
+		tenantBillings = append(tenantBillings, tb)
 	}
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
@@ -713,6 +703,58 @@ func tenantsBillingHandler(c echo.Context) error {
 			Tenants: tenantBillings,
 		},
 	})
+}
+
+func updateBilling(tenantId int64) {
+	ctx := context.Background()
+
+	t := TenantRow{}
+	if err := adminDB.SelectContext(
+		ctx,
+		&t,
+		"SELECT * FROM tenant WHERE tenant_id=?",
+		tenantId,
+	); err != nil {
+		fmt.Printf("failed to Select competition: %w\n", err)
+		return
+	}
+	err := func(t TenantRow) error {
+		tb := TenantWithBilling{
+			ID:          strconv.FormatInt(t.ID, 10),
+			Name:        t.Name,
+			DisplayName: t.DisplayName,
+		}
+		tenantDB, err := connectToTenantDB(t.ID)
+		if err != nil {
+			return fmt.Errorf("failed to connectToTenantDB: %w", err)
+		}
+		defer tenantDB.Close()
+		cs := []CompetitionRow{}
+		if err := tenantDB.SelectContext(
+			ctx,
+			&cs,
+			"SELECT * FROM competition WHERE tenant_id=?",
+			t.ID,
+		); err != nil {
+			return fmt.Errorf("failed to Select competition: %w", err)
+		}
+		for _, comp := range cs {
+			report, err := billingReportByCompetition(ctx, tenantDB, t.ID, comp.ID)
+			if err != nil {
+				return fmt.Errorf("failed to billingReportByCompetition: %w", err)
+			}
+			tb.BillingYen += report.BillingYen
+		}
+		if err != nil {
+			if _, err := adminDB.ExecContext(ctx, "UPDATE tenant SET billing = ? WHERE id = ?", tb.BillingYen, t.ID); err != nil {
+				return fmt.Errorf("error Update player: billing=%d, id=%d, %w", tb.BillingYen, t.ID, err)
+			}
+		}
+		return nil
+	}(t)
+	if err != nil {
+		fmt.Printf("error Select tenant: %w\n", err)
+	}
 }
 
 type PlayerDetail struct {
@@ -982,6 +1024,7 @@ func competitionFinishHandler(c echo.Context) error {
 			now, now, id, err,
 		)
 	}
+	go updateBilling(v.tenantID)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
 
@@ -1120,6 +1163,7 @@ func competitionScoreHandler(c echo.Context) error {
 				"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
 				ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt, err,
 			)
+
 		}
 	}
 
@@ -1240,47 +1284,25 @@ func playerHandler(c echo.Context) error {
 		return fmt.Errorf("error flockByTenantID: %w", err)
 	}
 	defer fl.Close()
-
-	// competitionのIDsを取得
-	cIds := make([]string, 0, len(cs))
-	for _, c := range cs {
-		cIds = append(cIds, c.ID)
-	}
-	if len(cIds) == 0 {
-		return fmt.Errorf("cids len = 0")
-	}
-	orgQuery := fmt.Sprintf(
-		"SELECT * FROM player_score WHERE tenant_id = '%d' AND player_id = '%s' AND competition_id IN (?) ORDER BY row_num",
-		v.tenantID,
-		p.ID,
-	)
-	query, args, err := sqlx.In(orgQuery, cIds)
-	if err != nil {
-		return err
-	}
-	var psrs []PlayerScoreRow
-	if err := tenantDB.SelectContext(ctx, &psrs, query, args...); err != nil {
-		return fmt.Errorf("error Select player score: id in %v, %w", cIds, err)
-	}
-	// row_numが一番大きいものだけを取り出す
-	compe2PsMap := make(map[string]PlayerScoreRow, len(cs))
-	for _, ps := range psrs {
-		if v, ok := compe2PsMap[ps.CompetitionID]; ok {
-			// 比較
-			if v.RowNum < ps.RowNum {
-				compe2PsMap[ps.CompetitionID] = ps
-			}
-		} else {
-			// init
-			compe2PsMap[ps.CompetitionID] = ps
-		}
-	}
-
 	pss := make([]PlayerScoreRow, 0, len(cs))
 	for _, c := range cs {
-		if ps, ok := compe2PsMap[c.ID]; ok {
-			pss = append(pss, ps)
+		ps := PlayerScoreRow{}
+		if err := tenantDB.GetContext(
+			ctx,
+			&ps,
+			// 最後にCSVに登場したスコアを採用する = row_numが一番大きいもの
+			"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? AND player_id = ? ORDER BY row_num DESC LIMIT 1",
+			v.tenantID,
+			c.ID,
+			p.ID,
+		); err != nil {
+			// 行がない = スコアが記録されてない
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, playerID=%s, %w", v.tenantID, c.ID, p.ID, err)
 		}
+		pss = append(pss, ps)
 	}
 
 	psds := make([]PlayerScoreDetail, 0, len(pss))
@@ -1415,38 +1437,6 @@ func competitionRankingHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
 	}
-	// 早期returnしておく
-	if len(pss) == 0 {
-		res := SuccessResult{
-			Status: true,
-			Data: CompetitionRankingHandlerResult{
-				Competition: CompetitionDetail{
-					ID:         competition.ID,
-					Title:      competition.Title,
-					IsFinished: competition.FinishedAt.Valid,
-				},
-				Ranks: []CompetitionRank{},
-			},
-		}
-		return c.JSON(http.StatusOK, res)
-	}
-	// player_idsを取得
-	pssIds := make([]string, 0, len(pss))
-	pssPlayerMap := make(map[string]PlayerRow, len(pss))
-	for _, ps := range pss {
-		if _, ok := pssPlayerMap[ps.PlayerID]; !ok {
-			pssPlayerMap[ps.PlayerID] = PlayerRow{}
-			pssIds = append(pssIds, ps.PlayerID)
-		}
-	}
-	pssPlayers, err := retrievePlayers(ctx, tenantDB, pssIds)
-	if err != nil {
-		return fmt.Errorf("error retrievePlayers: %w", err)
-	}
-	for _, v := range *pssPlayers {
-		pssPlayerMap[v.ID] = v
-	}
-
 	ranks := make([]CompetitionRank, 0, len(pss))
 	scoredPlayerSet := make(map[string]struct{}, len(pss))
 	for _, ps := range pss {
@@ -1456,16 +1446,16 @@ func competitionRankingHandler(c echo.Context) error {
 			continue
 		}
 		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		if p, ok := pssPlayerMap[ps.PlayerID]; ok {
-			ranks = append(ranks, CompetitionRank{
-				Score:             ps.Score,
-				PlayerID:          p.ID,
-				PlayerDisplayName: p.DisplayName,
-				RowNum:            ps.RowNum,
-			})
-		} else {
-			return fmt.Errorf("error retrievePlayer: no player")
+		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
+		if err != nil {
+			return fmt.Errorf("error retrievePlayer: %w", err)
 		}
+		ranks = append(ranks, CompetitionRank{
+			Score:             ps.Score,
+			PlayerID:          p.ID,
+			PlayerDisplayName: p.DisplayName,
+			RowNum:            ps.RowNum,
+		})
 	}
 	sort.Slice(ranks, func(i, j int) bool {
 		if ranks[i].Score == ranks[j].Score {
