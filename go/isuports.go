@@ -959,7 +959,6 @@ func competitionsAddHandler(c echo.Context) error {
 			id, v.tenantID, title, now, now, err,
 		)
 	}
-	updateBilling(v.tenantID)
 
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
@@ -1013,6 +1012,8 @@ func competitionFinishHandler(c echo.Context) error {
 			now, now, id, err,
 		)
 	}
+
+	go updateBilling(v.tenantID)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
 
