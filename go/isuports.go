@@ -688,13 +688,13 @@ func updateBilling(tenantId int64) {
 	ctx := context.Background()
 
 	t := TenantRow{}
-	if err := adminDB.SelectContext(
+	if err := adminDB.GetContext(
 		ctx,
 		&t,
 		"SELECT * FROM tenant WHERE id=?",
 		tenantId,
 	); err != nil {
-		fmt.Printf("failed to Select competition: %v\n", err)
+		fmt.Printf("failed to get tenant: %v\n", err)
 		return
 	}
 	err := func(t TenantRow) error {
