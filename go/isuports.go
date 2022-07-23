@@ -1373,22 +1373,22 @@ func competitionRankingHandler(c echo.Context) error {
 		"SELECT * from visit_history WHERE player_id = ? AND tenant_id = ? AND competition_id = ? LIMIT 1",
 		v.playerID, v.tenantID, competitionID,
 	); err != nil {
-		if err == sql.ErrNoRows {
-			if _, err := adminDB.ExecContext(
-				ctx,
-				"INSERT INTO visit_history (player_id, tenant_id, competition_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-				v.playerID, tenant.ID, competitionID, now, now,
-			); err != nil {
-				return fmt.Errorf(
-					"error Insert visit_history: playerID=%s, tenantID=%d, competitionID=%s, createdAt=%d, updatedAt=%d, %w",
-					v.playerID, tenant.ID, competitionID, now, now, err,
-				)
-			}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf(
+				"error get visit_history: playerID=%s, tenantID=%d, competitionID=%s: %w",
+				v.playerID, tenant.ID, competitionID, err,
+			)
 		}
-		return fmt.Errorf(
-			"error get visit_history: playerID=%s, tenantID=%d, competitionID=%s: %w",
-			v.playerID, tenant.ID, competitionID, err,
-		)
+		if _, err := adminDB.ExecContext(
+			ctx,
+			"INSERT INTO visit_history (player_id, tenant_id, competition_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+			v.playerID, tenant.ID, competitionID, now, now,
+		); err != nil {
+			return fmt.Errorf(
+				"error Insert visit_history: playerID=%s, tenantID=%d, competitionID=%s, createdAt=%d, updatedAt=%d, %w",
+				v.playerID, tenant.ID, competitionID, now, now, err,
+			)
+		}
 	}
 
 	var rankAfter int64
