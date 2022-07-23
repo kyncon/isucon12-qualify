@@ -114,15 +114,13 @@ func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 
 // Run は cmd/isuports/main.go から呼ばれるエントリーポイントです
 func Run() {
-	initProfiler()
+	// initProfiler()
 
 	e := echo.New()
 	e.Debug = false
 	e.Logger.SetLevel(log.DEBUG)
 
-	var (
-		err error
-	)
+	var err error
 
 	// e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
