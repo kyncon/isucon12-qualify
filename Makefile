@@ -12,7 +12,7 @@ NGINX_ERR_LOG:=/var/log/nginx/error.log
 ALP_FORMAT:=/image/\w+,/posts/\d+,/@\w+
 
 # TODO: mysqlのコンフィグファイルの場所を指定する
-MYSQL_CONF:=$(APP_HOME)/mysql/mysqld.cnf $(APP_HOME)/mysql/mysql.cnf
+MYSQL_CONF:=$(APP_HOME)/mysql/mysqld.cnf
 MYSQL_LOG:=/var/log/mysql/mysql-slow.log
 
 # TODO: IPを埋める
