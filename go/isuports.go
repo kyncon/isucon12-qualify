@@ -1084,7 +1084,6 @@ func competitionScoreHandler(c echo.Context) error {
 	var rowNum int64
 	playerIds := []string{}
 	playerScoreRows := []PlayerScoreRow{}
-	playerRows := []PlayerRow{}
 	for {
 		rowNum++
 		row, err := r.Read()
@@ -1170,7 +1169,7 @@ func competitionScoreHandler(c echo.Context) error {
 		)
 	}
 
-	rank, err := calcRanking(playerScoreRows, playerRows)
+	rank, err := calcRanking(playerScoreRows, *playerRows)
 	if err != nil {
 		return fmt.Errorf("error in calc ranking: %w", err)
 	}
