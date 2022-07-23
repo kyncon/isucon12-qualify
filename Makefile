@@ -9,7 +9,8 @@ NGINX_CONF:=$(APP_HOME)/nginx/nginx.conf
 NGINX_APP_CONF:=$(APP_HOME)/nginx/isuports.conf
 NGINX_LOG:=/var/log/nginx/access.log
 NGINX_ERR_LOG:=/var/log/nginx/error.log
-ALP_FORMAT:=/image/\w+,/posts/\d+,/@\w+
+ALP_FORMAT:=/api/organizer/player/\w+/disqualified,/api/organizer/competition/\w+/finish,/api/organizer/competition/\w+/score,/api/player/player/\w+,/api/player/competition/\w+/ranking
+
 
 # TODO: mysqlのコンフィグファイルの場所を指定する
 MYSQL_CONF:=$(APP_HOME)/mysql/mysqld.cnf
@@ -39,15 +40,21 @@ build:
 
 # Set app, mysql and nginx.
 build-server1: build-app build-nginx build-mysql
-build-server2: build-app
-build-server3: build-app
+build-server2: stop-app build-mysql
+build-server3: stop-app
 
 DATE=$(shell date '+%T')
 
 build-app:
 	sudo systemctl stop $(SYSTEMCTL_APP)
 	cd $(APP_DIRECTORY) && $(APP_BUILD_COMMAND)
+	sudo mv $(APP_HOME)/system/isuports.service /etc/systemd/system/
+	sudo systemctl daemon-reload
 	sudo systemctl restart $(SYSTEMCTL_APP)
+
+stop-app:
+	sudo systemctl stop $(SYSTEMCTL_APP)
+	sudo systemctl disable $(SYSTEMCTL_APP)
 
 build-nginx:
 	-sudo cp -f $(NGINX_LOG) /tmp/nginx_access_$(shell echo $(BRANCH) | sed -e "s@/@-@g")_latest.log
