@@ -99,7 +99,7 @@ func createTenantDB(id int64) error {
 
 // システム全体で一意なIDを生成する
 func dispenseID(ctx context.Context) (string, error) {
-	return fmt.Sprintf("%x", time.Now().Unix()), nil
+	return fmt.Sprintf("%x", time.Now().UnixMicro()), nil
 }
 
 // 全APIにCache-Control: privateを設定する
@@ -914,7 +914,7 @@ func competitionsAddHandler(c echo.Context) error {
 
 	title := c.FormValue("title")
 
-	now := time.Now().UnixMicro()
+	now := time.Now().Unix()
 	id, err := dispenseID(ctx)
 	if err != nil {
 		return fmt.Errorf("error dispenseID: %w", err)
