@@ -30,9 +30,9 @@ mysql -u"$TENANT_DB_USER" \
   --port "$TENANT_DB_PORT" \
   "$TENANT_DB_NAME" < ./tenant/10_schema.sql
 for db in $( ls ../../initial_data/*.db ); do
-  mysql -u"$TENANT_DB_USER" \
+  ./sqlite3-to-sql "$db" | mysql -u"$TENANT_DB_USER" \
     -p"$TENANT_DB_PASSWORD" \
     --host "$TENANT_DB_HOST" \
     --port "$TENANT_DB_PORT" \
-    "$TENANT_DB_NAME" < <( ./sqlite3-to-sql $db )
+    "$TENANT_DB_NAME"
 done
