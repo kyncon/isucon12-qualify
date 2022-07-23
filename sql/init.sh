@@ -21,5 +21,5 @@ rm -f ../tenant_db/*.db
 cp -r ../../initial_data/*.db ../tenant_db/
 
 for db in $( ls ../tenant_db/*.db ); do
-  sqlite3 "$db" "CREATE INDEX player_tenant_id ON player(tenant_id);" ".exit"
+  sqlite3 "$db" "CREATE INDEX player_tenant_id ON player(tenant_id);" "CREATE INDEX competition_created_at ON competition(created_at);" "CREATE INDEX palyer_score_competition_id ON player_score(competition_id);" "CREATE INDEX palyer_score_player_id ON player_score(player_id);" ".exit"
 done
