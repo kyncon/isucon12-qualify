@@ -41,7 +41,7 @@ build:
 # Set app, mysql and nginx.
 build-server1: build-app build-nginx build-mysql
 build-server2: stop-app build-mysql
-build-server3: stop-app
+build-server3: build-app
 
 DATE=$(shell date '+%T')
 

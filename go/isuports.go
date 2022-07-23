@@ -130,6 +130,7 @@ func Run() {
 
 	// SaaS管理者向けAPI
 	e.POST("/api/admin/tenants/add", tenantsAddHandler)
+	e.POST("/api/local/tenants/add", tenantsLocalAddHandler)
 	e.GET("/api/admin/tenants/billing", tenantsBillingHandler)
 
 	// テナント管理者向けAPI - 参加者追加、一覧、失格
@@ -433,6 +434,18 @@ type TenantsAddHandlerResult struct {
 	Tenant TenantWithBilling `json:"tenant"`
 }
 
+func tenantsLocalAddHandler(c echo.Context) error {
+	id, err := strconv.Atoi(c.QueryParam("id"))
+	if err != nil {
+		return err
+	}
+
+	if err := createTenantDB(int64(id)); err != nil {
+		return fmt.Errorf("error createTenantDB: id=%d %w", id, err)
+	}
+	return nil
+}
+
 // SasS管理者用API
 // テナントを追加する
 // POST /api/admin/tenants/add
@@ -485,8 +498,13 @@ func tenantsAddHandler(c echo.Context) error {
 	if err := createTenantDB(id); err != nil {
 		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
 	}
+	c.Logger().Info("curl api/local/tenants/add?id=", id)
+	_, err = http.NewRequest("POST", fmt.Sprintf("http://192.168.0.13:3000/api/local/tenants/add?id=%d", id), nil)
+	if err != nil {
+		return fmt.Errorf("Cannot create tenant DB: %w", err)
+	}
 
-	res := TenantsAddHandlerResult{
+	resp := TenantsAddHandlerResult{
 		Tenant: TenantWithBilling{
 			ID:          strconv.FormatInt(id, 10),
 			Name:        name,
@@ -494,7 +512,7 @@ func tenantsAddHandler(c echo.Context) error {
 			BillingYen:  0,
 		},
 	}
-	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: res})
+	return c.JSON(http.StatusOK, SuccessResult{Status: true, Data: resp})
 }
 
 // テナント名が規則に沿っているかチェックする
@@ -1747,6 +1765,13 @@ type InitializeHandlerResult struct {
 // ベンチマーカーが起動したときに最初に呼ぶ
 // データベースの初期化などが実行されるため、スキーマを変更した場合などは適宜改変すること
 func initializeHandler(c echo.Context) error {
+	c.Logger().Info("Initialized")
+	if os.Getenv("MASTER") != "" {
+		_, err := http.NewRequest("POST", "http://192.168.0.13:3000/initialize", nil)
+		if err != nil {
+			fmt.Println(err)
+		}
+	}
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
