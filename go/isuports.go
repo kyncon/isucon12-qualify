@@ -138,6 +138,7 @@ func Run() {
 
 	// SaaS管理者向けAPI
 	e.POST("/api/admin/tenants/add", tenantsAddHandler)
+	e.POST("/api/local/tenants/add", tenantsLocalAddHandler)
 	e.GET("/api/admin/tenants/billing", tenantsBillingHandler)
 
 	// テナント管理者向けAPI - 参加者追加、一覧、失格
@@ -441,6 +442,18 @@ type TenantsAddHandlerResult struct {
 	Tenant TenantWithBilling `json:"tenant"`
 }
 
+func tenantsLocalAddHandler(c echo.Context) error {
+	id, err := strings.Atoi(c.QueryParam("id"))
+	if err != nil {
+		return err
+	}
+
+	if err := createTenantDB(id); err != nil {
+		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, err)
+	}
+	return nil
+}
+
 // SasS管理者用API
 // テナントを追加する
 // POST /api/admin/tenants/add
@@ -492,6 +505,10 @@ func tenantsAddHandler(c echo.Context) error {
 	//       ロックなどで対処したほうが良さそう
 	if err := createTenantDB(id); err != nil {
 		return fmt.Errorf("error createTenantDB: id=%d name=%s %w", id, name, err)
+	}
+	_, err = http.NewRequest("POST", fmt.Sprintf("http://192.168.0.13:3000/api/local/tenants/add?id=%d", id), nil)
+	if err != nil {
+		return fmt.Errorf("Cannot create tenant DB: %w", err)
 	}
 
 	res := TenantsAddHandlerResult{
