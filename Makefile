@@ -87,7 +87,7 @@ echo-branch:
 
 log-app:
 	sudo systemctl status $(SYSTEMCTL_APP) | $(SLACKCAT_RAW_CMD)
-	go run $(APP_HOME)/sqlite-view /home/isucon/sqlite.log
+	cd $(APP_HOME)/sqlite-view && go run . /home/isucon/sqlite.log
 
 log-nginx:
 	sudo cat $(NGINX_LOG) | alp ltsv -m "$(ALP_FORMAT)" --sort=sum -r | $(SLACKCAT_RAW_CMD)
