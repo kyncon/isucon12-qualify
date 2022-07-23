@@ -47,6 +47,8 @@ var (
 	adminDB *sqlx.DB
 
 	sqliteDriverName = "sqlite3"
+
+	cachedRankMap = newMutexCompetitionRankMap()
 )
 
 // 環境変数を取得する、なければデフォルト値を返す
@@ -1079,13 +1081,8 @@ func competitionScoreHandler(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid CSV headers")
 	}
 
-	// / DELETEしたタイミングで参照が来ると空っぽのランキングになるのでロックする
-	fl, err := flockByTenantID(v.tenantID)
-	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
-	}
-	defer fl.Close()
 	var rowNum int64
+	playerIds := []string{}
 	playerScoreRows := []PlayerScoreRow{}
 	for {
 		rowNum++
@@ -1100,16 +1097,7 @@ func competitionScoreHandler(c echo.Context) error {
 			return fmt.Errorf("row must have two columns: %#v", row)
 		}
 		playerID, scoreStr := row[0], row[1]
-		if _, err := retrievePlayer(ctx, tenantDB, playerID); err != nil {
-			// 存在しない参加者が含まれている
-			if errors.Is(err, sql.ErrNoRows) {
-				return echo.NewHTTPError(
-					http.StatusBadRequest,
-					fmt.Sprintf("player not found: %s", playerID),
-				)
-			}
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
+		playerIds = append(playerIds, playerID)
 		var score int64
 		if score, err = strconv.ParseInt(scoreStr, 10, 64); err != nil {
 			return echo.NewHTTPError(
@@ -1117,6 +1105,7 @@ func competitionScoreHandler(c echo.Context) error {
 				fmt.Sprintf("error strconv.ParseUint: scoreStr=%s, %s", scoreStr, err),
 			)
 		}
+		time.Sleep(1 * time.Microsecond)
 		id, err := dispenseID(ctx)
 		if err != nil {
 			return fmt.Errorf("error dispenseID: %w", err)
@@ -1134,6 +1123,33 @@ func competitionScoreHandler(c echo.Context) error {
 		})
 	}
 
+	// 存在しない参加者がいないかチェック
+	playerRows, err := retrievePlayers(ctx, tenantDB, playerIds)
+	if err != nil {
+		return fmt.Errorf("error retrievePlayers: %w", err)
+	}
+	for _, pid := range playerIds {
+		ok := false
+		for _, player := range *playerRows {
+			if pid == player.ID {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return echo.NewHTTPError(
+				http.StatusBadRequest,
+				fmt.Sprintf("player not found: %s", pid),
+			)
+		}
+	}
+
+	// / DELETEしたタイミングで参照が来ると空っぽのランキングになるのでロックする
+	fl, err := flockByTenantID(v.tenantID)
+	if err != nil {
+		return fmt.Errorf("error flockByTenantID: %w", err)
+	}
+	defer fl.Close()
 	if _, err := tenantDB.ExecContext(
 		ctx,
 		"DELETE FROM player_score WHERE tenant_id = ? AND competition_id = ?",
@@ -1142,18 +1158,22 @@ func competitionScoreHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
 	}
-	for _, ps := range playerScoreRows {
-		if _, err := tenantDB.NamedExecContext(
-			ctx,
-			"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
-			ps,
-		); err != nil {
-			return fmt.Errorf(
-				"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
-				ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt, err,
-			)
-		}
+	if _, err := tenantDB.NamedExecContext(
+		ctx,
+		"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
+		playerScoreRows,
+	); err != nil {
+		return fmt.Errorf(
+			"error Insert player_score: bulk insert %v: %w",
+			playerScoreRows, err,
+		)
 	}
+
+	rank, err := calcRanking(playerScoreRows, *playerRows)
+	if err != nil {
+		return fmt.Errorf("error in calc ranking: %w", err)
+	}
+	cachedRankMap.Set(v.tenantID, competitionID, rank)
 
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
@@ -1441,80 +1461,59 @@ func competitionRankingHandler(c echo.Context) error {
 		}
 	}
 
-	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := flockByTenantID(v.tenantID)
-	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
-	}
-	defer fl.Close()
-	pss := []PlayerScoreRow{}
-	if err := tenantDB.SelectContext(
-		ctx,
-		&pss,
-		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
-		tenant.ID,
-		competitionID,
-	); err != nil {
-		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
-	}
-	// 早期returnしておく
-	if len(pss) == 0 {
-		res := SuccessResult{
-			Status: true,
-			Data: CompetitionRankingHandlerResult{
-				Competition: CompetitionDetail{
-					ID:         competition.ID,
-					Title:      competition.Title,
-					IsFinished: competition.FinishedAt.Valid,
+	ranks := cachedRankMap.Get(v.tenantID, competitionID)
+	if ranks == nil {
+		// まだcacheに入っていなければcacheする
+		// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
+		fl, err := flockByTenantID(v.tenantID)
+		if err != nil {
+			return fmt.Errorf("error flockByTenantID: %w", err)
+		}
+		defer fl.Close()
+		pss := []PlayerScoreRow{}
+		if err := tenantDB.SelectContext(
+			ctx,
+			&pss,
+			"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
+			tenant.ID,
+			competitionID,
+		); err != nil {
+			return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
+		}
+		// 早期returnしておく
+		if len(pss) == 0 {
+			res := SuccessResult{
+				Status: true,
+				Data: CompetitionRankingHandlerResult{
+					Competition: CompetitionDetail{
+						ID:         competition.ID,
+						Title:      competition.Title,
+						IsFinished: competition.FinishedAt.Valid,
+					},
+					Ranks: []CompetitionRank{},
 				},
-				Ranks: []CompetitionRank{},
-			},
+			}
+			return c.JSON(http.StatusOK, res)
 		}
-		return c.JSON(http.StatusOK, res)
-	}
-	// player_idsを取得
-	pssIds := make([]string, 0, len(pss))
-	pssPlayerMap := make(map[string]PlayerRow, len(pss))
-	for _, ps := range pss {
-		if _, ok := pssPlayerMap[ps.PlayerID]; !ok {
-			pssPlayerMap[ps.PlayerID] = PlayerRow{}
-			pssIds = append(pssIds, ps.PlayerID)
+		// player_idsを取得
+		pssIds := make([]string, 0, len(pss))
+		pssPlayerMap := make(map[string]PlayerRow, len(pss))
+		for _, ps := range pss {
+			if _, ok := pssPlayerMap[ps.PlayerID]; !ok {
+				pssPlayerMap[ps.PlayerID] = PlayerRow{}
+				pssIds = append(pssIds, ps.PlayerID)
+			}
 		}
-	}
-	pssPlayers, err := retrievePlayers(ctx, tenantDB, pssIds)
-	if err != nil {
-		return fmt.Errorf("error retrievePlayers: %w", err)
-	}
-	for _, v := range *pssPlayers {
-		pssPlayerMap[v.ID] = v
+		pssPlayers, err := retrievePlayers(ctx, tenantDB, pssIds)
+		if err != nil {
+			return fmt.Errorf("error retrievePlayers: %w", err)
+		}
+		ranks, err = calcRanking(pss, *pssPlayers)
+		if err != nil {
+			return err
+		}
 	}
 
-	ranks := make([]CompetitionRank, 0, len(pss))
-	scoredPlayerSet := make(map[string]struct{}, len(pss))
-	for _, ps := range pss {
-		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
-		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
-		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
-			continue
-		}
-		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		if p, ok := pssPlayerMap[ps.PlayerID]; ok {
-			ranks = append(ranks, CompetitionRank{
-				Score:             ps.Score,
-				PlayerID:          p.ID,
-				PlayerDisplayName: p.DisplayName,
-				RowNum:            ps.RowNum,
-			})
-		} else {
-			return fmt.Errorf("error retrievePlayer: no player")
-		}
-	}
-	sort.Slice(ranks, func(i, j int) bool {
-		if ranks[i].Score == ranks[j].Score {
-			return ranks[i].RowNum < ranks[j].RowNum
-		}
-		return ranks[i].Score > ranks[j].Score
-	})
 	pagedRanks := make([]CompetitionRank, 0, 100)
 	for i, rank := range ranks {
 		if int64(i) < rankAfter {
@@ -1543,6 +1542,51 @@ func competitionRankingHandler(c echo.Context) error {
 		},
 	}
 	return c.JSON(http.StatusOK, res)
+}
+
+func calcRanking(pss []PlayerScoreRow, pssPlayers []PlayerRow) ([]CompetitionRank, error) {
+	// 早期returnしておく
+	if len(pss) == 0 {
+		return []CompetitionRank{}, nil
+	}
+	// player_idsを取得
+	pssPlayerMap := make(map[string]PlayerRow, len(pss))
+	for _, ps := range pss {
+		if _, ok := pssPlayerMap[ps.PlayerID]; !ok {
+			pssPlayerMap[ps.PlayerID] = PlayerRow{}
+		}
+	}
+	for _, v := range pssPlayers {
+		pssPlayerMap[v.ID] = v
+	}
+
+	ranks := make([]CompetitionRank, 0, len(pss))
+	scoredPlayerSet := make(map[string]struct{}, len(pss))
+	for _, ps := range pss {
+		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
+		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
+		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
+			continue
+		}
+		scoredPlayerSet[ps.PlayerID] = struct{}{}
+		if p, ok := pssPlayerMap[ps.PlayerID]; ok {
+			ranks = append(ranks, CompetitionRank{
+				Score:             ps.Score,
+				PlayerID:          p.ID,
+				PlayerDisplayName: p.DisplayName,
+				RowNum:            ps.RowNum,
+			})
+		} else {
+			return nil, fmt.Errorf("error retrievePlayer: no player")
+		}
+	}
+	sort.Slice(ranks, func(i, j int) bool {
+		if ranks[i].Score == ranks[j].Score {
+			return ranks[i].RowNum < ranks[j].RowNum
+		}
+		return ranks[i].Score > ranks[j].Score
+	})
+	return ranks, nil
 }
 
 type CompetitionsHandlerResult struct {
