@@ -852,7 +852,7 @@ func playersAddHandler(c echo.Context) error {
 	query := "INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (:id, :tenant_id, :display_name, :is_disqualified, :created_at, :update_at)"
 	_, err = tenantDB.NamedExec(query, insertData)
 	if err != nil {
-		return fmt.Errorf("failed to insert")
+		return fmt.Errorf("failed to insert: %w", err)
 	}
 
 	res := PlayersAddHandlerResult{
