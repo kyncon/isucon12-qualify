@@ -389,7 +389,7 @@ func retrievePlayers(ctx context.Context, tenantDB dbOrTx, ids []string) (*[]Pla
 		return nil, err
 	}
 	var ps []PlayerRow
-	if err := tenantDB.GetContext(ctx, &ps, query, args...); err != nil {
+	if err := tenantDB.SelectContext(ctx, &ps, query, args...); err != nil {
 		return nil, fmt.Errorf("error Select player: id in %v, %w", ids, err)
 	}
 	return &ps, nil
