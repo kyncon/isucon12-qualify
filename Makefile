@@ -46,6 +46,7 @@ build-server3: stop-app
 DATE=$(shell date '+%T')
 
 build-app:
+	rm /home/isucon/sqlite.log
 	sudo systemctl stop $(SYSTEMCTL_APP)
 	cd $(APP_DIRECTORY) && $(APP_BUILD_COMMAND)
 	sudo cp $(APP_HOME)/system/isuports.service /etc/systemd/system/
@@ -86,6 +87,7 @@ echo-branch:
 
 log-app:
 	sudo systemctl status $(SYSTEMCTL_APP) | $(SLACKCAT_RAW_CMD)
+	cd $(APP_HOME)/sqlite-view && go run . /home/isucon/sqlite.log | head -n 100 | $(SLACKCAT_RAW_CMD)
 
 log-nginx:
 	sudo cat $(NGINX_LOG) | alp ltsv -m "$(ALP_FORMAT)" --sort=sum -r | $(SLACKCAT_RAW_CMD)
