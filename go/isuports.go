@@ -825,7 +825,7 @@ func playersAddHandler(c echo.Context) error {
 	}
 	displayNames := params["display_name[]"]
 
-	insertData := make([]PlayerRow, len(displayNames))
+	insertData := make([]PlayerRow, 0, len(displayNames))
 	pds := make([]PlayerDetail, 0, len(displayNames))
 	for _, displayName := range displayNames {
 		id, err := dispenseID(ctx)
