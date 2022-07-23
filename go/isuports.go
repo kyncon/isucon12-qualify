@@ -1386,15 +1386,29 @@ func competitionRankingHandler(c echo.Context) error {
 		return fmt.Errorf("error Select tenant: id=%d, %w", v.tenantID, err)
 	}
 
-	// TODO: 2回目のvisitならinsertしなくてよさそう
-	if _, err := adminDB.ExecContext(
+	// 2回目のvisitならinsertしない
+	var vhr VisitHistoryRow
+	if err := adminDB.GetContext(
 		ctx,
-		"INSERT INTO visit_history (player_id, tenant_id, competition_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-		v.playerID, tenant.ID, competitionID, now, now,
+		&vhr,
+		"SELECT * from visit_history WHERE player_id = ? tenant_id = ? competition_id = ? LIMIT 1",
+		v.playerID, v.tenantID, competitionID,
 	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			if _, err := adminDB.ExecContext(
+				ctx,
+				"INSERT INTO visit_history (player_id, tenant_id, competition_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+				v.playerID, tenant.ID, competitionID, now, now,
+			); err != nil {
+				return fmt.Errorf(
+					"error Insert visit_history: playerID=%s, tenantID=%d, competitionID=%s, createdAt=%d, updatedAt=%d, %w",
+					v.playerID, tenant.ID, competitionID, now, now, err,
+				)
+			}
+		}
 		return fmt.Errorf(
-			"error Insert visit_history: playerID=%s, tenantID=%d, competitionID=%s, createdAt=%d, updatedAt=%d, %w",
-			v.playerID, tenant.ID, competitionID, now, now, err,
+			"error get visit_history: playerID=%s, tenantID=%d, competitionID=%s: %w",
+			v.playerID, tenant.ID, competitionID, err,
 		)
 	}
 
