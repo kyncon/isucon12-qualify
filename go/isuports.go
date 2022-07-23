@@ -47,6 +47,8 @@ var (
 	adminDB *sqlx.DB
 
 	sqliteDriverName = "sqlite3"
+
+	cachedRankMap = newMutexCompetitionRankMap()
 )
 
 // 環境変数を取得する、なければデフォルト値を返す
@@ -1066,6 +1068,7 @@ func competitionScoreHandler(c echo.Context) error {
 	defer fl.Close()
 	var rowNum int64
 	playerScoreRows := []PlayerScoreRow{}
+	playerRows := []PlayerRow{}
 	for {
 		rowNum++
 		row, err := r.Read()
@@ -1079,7 +1082,7 @@ func competitionScoreHandler(c echo.Context) error {
 			return fmt.Errorf("row must have two columns: %#v", row)
 		}
 		playerID, scoreStr := row[0], row[1]
-		if _, err := retrievePlayer(ctx, tenantDB, playerID); err != nil {
+		if p, err := retrievePlayer(ctx, tenantDB, playerID); err != nil {
 			// 存在しない参加者が含まれている
 			if errors.Is(err, sql.ErrNoRows) {
 				return echo.NewHTTPError(
@@ -1088,6 +1091,8 @@ func competitionScoreHandler(c echo.Context) error {
 				)
 			}
 			return fmt.Errorf("error retrievePlayer: %w", err)
+		} else {
+			playerRows = append(playerRows, *p)
 		}
 		var score int64
 		if score, err = strconv.ParseInt(scoreStr, 10, 64); err != nil {
@@ -1133,6 +1138,12 @@ func competitionScoreHandler(c echo.Context) error {
 			)
 		}
 	}
+
+	rank, err := calcRanking(playerScoreRows, playerRows)
+	if err != nil {
+		return fmt.Errorf("error in calc ranking: %w", err)
+	}
+	cachedRankMap.Set(v.tenantID, competitionID, rank)
 
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
@@ -1410,80 +1421,59 @@ func competitionRankingHandler(c echo.Context) error {
 		}
 	}
 
-	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := flockByTenantID(v.tenantID)
-	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
-	}
-	defer fl.Close()
-	pss := []PlayerScoreRow{}
-	if err := tenantDB.SelectContext(
-		ctx,
-		&pss,
-		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
-		tenant.ID,
-		competitionID,
-	); err != nil {
-		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
-	}
-	// 早期returnしておく
-	if len(pss) == 0 {
-		res := SuccessResult{
-			Status: true,
-			Data: CompetitionRankingHandlerResult{
-				Competition: CompetitionDetail{
-					ID:         competition.ID,
-					Title:      competition.Title,
-					IsFinished: competition.FinishedAt.Valid,
+	ranks := cachedRankMap.Get(v.tenantID, competitionID)
+	if ranks == nil {
+		// まだcacheに入っていなければcacheする
+		// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
+		fl, err := flockByTenantID(v.tenantID)
+		if err != nil {
+			return fmt.Errorf("error flockByTenantID: %w", err)
+		}
+		defer fl.Close()
+		pss := []PlayerScoreRow{}
+		if err := tenantDB.SelectContext(
+			ctx,
+			&pss,
+			"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
+			tenant.ID,
+			competitionID,
+		); err != nil {
+			return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
+		}
+		// 早期returnしておく
+		if len(pss) == 0 {
+			res := SuccessResult{
+				Status: true,
+				Data: CompetitionRankingHandlerResult{
+					Competition: CompetitionDetail{
+						ID:         competition.ID,
+						Title:      competition.Title,
+						IsFinished: competition.FinishedAt.Valid,
+					},
+					Ranks: []CompetitionRank{},
 				},
-				Ranks: []CompetitionRank{},
-			},
+			}
+			return c.JSON(http.StatusOK, res)
 		}
-		return c.JSON(http.StatusOK, res)
-	}
-	// player_idsを取得
-	pssIds := make([]string, 0, len(pss))
-	pssPlayerMap := make(map[string]PlayerRow, len(pss))
-	for _, ps := range pss {
-		if _, ok := pssPlayerMap[ps.PlayerID]; !ok {
-			pssPlayerMap[ps.PlayerID] = PlayerRow{}
-			pssIds = append(pssIds, ps.PlayerID)
+		// player_idsを取得
+		pssIds := make([]string, 0, len(pss))
+		pssPlayerMap := make(map[string]PlayerRow, len(pss))
+		for _, ps := range pss {
+			if _, ok := pssPlayerMap[ps.PlayerID]; !ok {
+				pssPlayerMap[ps.PlayerID] = PlayerRow{}
+				pssIds = append(pssIds, ps.PlayerID)
+			}
 		}
-	}
-	pssPlayers, err := retrievePlayers(ctx, tenantDB, pssIds)
-	if err != nil {
-		return fmt.Errorf("error retrievePlayers: %w", err)
-	}
-	for _, v := range *pssPlayers {
-		pssPlayerMap[v.ID] = v
+		pssPlayers, err := retrievePlayers(ctx, tenantDB, pssIds)
+		if err != nil {
+			return fmt.Errorf("error retrievePlayers: %w", err)
+		}
+		ranks, err = calcRanking(pss, *pssPlayers)
+		if err != nil {
+			return err
+		}
 	}
 
-	ranks := make([]CompetitionRank, 0, len(pss))
-	scoredPlayerSet := make(map[string]struct{}, len(pss))
-	for _, ps := range pss {
-		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
-		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
-		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
-			continue
-		}
-		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		if p, ok := pssPlayerMap[ps.PlayerID]; ok {
-			ranks = append(ranks, CompetitionRank{
-				Score:             ps.Score,
-				PlayerID:          p.ID,
-				PlayerDisplayName: p.DisplayName,
-				RowNum:            ps.RowNum,
-			})
-		} else {
-			return fmt.Errorf("error retrievePlayer: no player")
-		}
-	}
-	sort.Slice(ranks, func(i, j int) bool {
-		if ranks[i].Score == ranks[j].Score {
-			return ranks[i].RowNum < ranks[j].RowNum
-		}
-		return ranks[i].Score > ranks[j].Score
-	})
 	pagedRanks := make([]CompetitionRank, 0, 100)
 	for i, rank := range ranks {
 		if int64(i) < rankAfter {
@@ -1512,6 +1502,51 @@ func competitionRankingHandler(c echo.Context) error {
 		},
 	}
 	return c.JSON(http.StatusOK, res)
+}
+
+func calcRanking(pss []PlayerScoreRow, pssPlayers []PlayerRow) ([]CompetitionRank, error) {
+	// 早期returnしておく
+	if len(pss) == 0 {
+		return []CompetitionRank{}, nil
+	}
+	// player_idsを取得
+	pssPlayerMap := make(map[string]PlayerRow, len(pss))
+	for _, ps := range pss {
+		if _, ok := pssPlayerMap[ps.PlayerID]; !ok {
+			pssPlayerMap[ps.PlayerID] = PlayerRow{}
+		}
+	}
+	for _, v := range pssPlayers {
+		pssPlayerMap[v.ID] = v
+	}
+
+	ranks := make([]CompetitionRank, 0, len(pss))
+	scoredPlayerSet := make(map[string]struct{}, len(pss))
+	for _, ps := range pss {
+		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
+		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
+		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
+			continue
+		}
+		scoredPlayerSet[ps.PlayerID] = struct{}{}
+		if p, ok := pssPlayerMap[ps.PlayerID]; ok {
+			ranks = append(ranks, CompetitionRank{
+				Score:             ps.Score,
+				PlayerID:          p.ID,
+				PlayerDisplayName: p.DisplayName,
+				RowNum:            ps.RowNum,
+			})
+		} else {
+			return nil, fmt.Errorf("error retrievePlayer: no player")
+		}
+	}
+	sort.Slice(ranks, func(i, j int) bool {
+		if ranks[i].Score == ranks[j].Score {
+			return ranks[i].RowNum < ranks[j].RowNum
+		}
+		return ranks[i].Score > ranks[j].Score
+	})
+	return ranks, nil
 }
 
 type CompetitionsHandlerResult struct {
