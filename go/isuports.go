@@ -1266,12 +1266,6 @@ func playerHandler(c echo.Context) error {
 		return fmt.Errorf("error Select competition: %w", err)
 	}
 
-	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
-	fl, err := flockByTenantID(v.tenantID)
-	if err != nil {
-		return fmt.Errorf("error flockByTenantID: %w", err)
-	}
-
 	// competitionのIDsを取得
 	cIds := make([]string, 0, len(cs))
 	for _, c := range cs {
@@ -1280,6 +1274,13 @@ func playerHandler(c echo.Context) error {
 	if len(cIds) == 0 {
 		return fmt.Errorf("cids len = 0")
 	}
+
+	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
+	fl, err := flockByTenantID(v.tenantID)
+	if err != nil {
+		return fmt.Errorf("error flockByTenantID: %w", err)
+	}
+
 	orgQuery := fmt.Sprintf(
 		"SELECT * FROM player_score WHERE tenant_id = '%d' AND player_id = '%s' AND competition_id IN (?) ORDER BY row_num",
 		v.tenantID,
