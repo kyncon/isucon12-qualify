@@ -31,3 +31,4 @@ CREATE TABLE `visit_history` (
 ) ENGINE=InnoDB DEFAULT CHARACTER SET=utf8mb4;
 
 ALTER TABLE `visit_history` ADD INDEX player_tenant_competition_idx (player_id, tenant_id, competition_id);
+ALTER TABLE `visit_history` ADD INDEX tenant_competition_idx (tenant_id, competition_id);
