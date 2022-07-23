@@ -376,6 +376,23 @@ func retrievePlayer(ctx context.Context, tenantDB dbOrTx, id string) (*PlayerRow
 	return &p, nil
 }
 
+// 参加者を一括取得する
+func retrievePlayers(ctx context.Context, tenantDB dbOrTx, ids []string) (*[]PlayerRow, error) {
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("ids len = 0")
+	}
+	orgQuery := "SELECT * FROM `player` WHERE id IN (?)"
+	query, args, err := sqlx.In(orgQuery, ids)
+	if err != nil {
+		return nil, err
+	}
+	var ps []PlayerRow
+	if err := tenantDB.GetContext(ctx, &ps, query, args...); err != nil {
+		return nil, fmt.Errorf("error Select player: id in %v, %w", ids, err)
+	}
+	return &ps, nil
+}
+
 // 参加者を認可する
 // 参加者向けAPIで呼ばれる
 func authorizePlayer(ctx context.Context, tenantDB dbOrTx, id string) error {
@@ -1340,6 +1357,7 @@ func competitionRankingHandler(c echo.Context) error {
 		return fmt.Errorf("error Select tenant: id=%d, %w", v.tenantID, err)
 	}
 
+	// TODO: 2回目のvisitならinsertしなくてよさそう
 	if _, err := adminDB.ExecContext(
 		ctx,
 		"INSERT INTO visit_history (player_id, tenant_id, competition_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -1375,6 +1393,38 @@ func competitionRankingHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
 	}
+	// 早期returnしておく
+	if len(pss) == 0 {
+		res := SuccessResult{
+			Status: true,
+			Data: CompetitionRankingHandlerResult{
+				Competition: CompetitionDetail{
+					ID:         competition.ID,
+					Title:      competition.Title,
+					IsFinished: competition.FinishedAt.Valid,
+				},
+				Ranks: []CompetitionRank{},
+			},
+		}
+		return c.JSON(http.StatusOK, res)
+	}
+	// player_idsを取得
+	pssIds := make([]string, 0, len(pss))
+	pssPlayerMap := make(map[string]PlayerRow, len(pss))
+	for _, ps := range pss {
+		if _, ok := pssPlayerMap[ps.PlayerID]; !ok {
+			pssPlayerMap[ps.PlayerID] = PlayerRow{}
+			pssIds = append(pssIds, ps.PlayerID)
+		}
+	}
+	pssPlayers, err := retrievePlayers(ctx, tenantDB, pssIds)
+	if err != nil {
+		return fmt.Errorf("error retrievePlayers: %w", err)
+	}
+	for _, v := range *pssPlayers {
+		pssPlayerMap[v.ID] = v
+	}
+
 	ranks := make([]CompetitionRank, 0, len(pss))
 	scoredPlayerSet := make(map[string]struct{}, len(pss))
 	for _, ps := range pss {
@@ -1384,16 +1434,16 @@ func competitionRankingHandler(c echo.Context) error {
 			continue
 		}
 		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
+		if p, ok := pssPlayerMap[ps.PlayerID]; ok {
+			ranks = append(ranks, CompetitionRank{
+				Score:             ps.Score,
+				PlayerID:          p.ID,
+				PlayerDisplayName: p.DisplayName,
+				RowNum:            ps.RowNum,
+			})
+		} else {
+			return fmt.Errorf("error retrievePlayer: no player")
 		}
-		ranks = append(ranks, CompetitionRank{
-			Score:             ps.Score,
-			PlayerID:          p.ID,
-			PlayerDisplayName: p.DisplayName,
-			RowNum:            ps.RowNum,
-		})
 	}
 	sort.Slice(ranks, func(i, j int) bool {
 		if ranks[i].Score == ranks[j].Score {
