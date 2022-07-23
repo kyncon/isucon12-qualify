@@ -1711,6 +1711,7 @@ func initializeHandler(c echo.Context) error {
 }
 
 func completeBilling() error {
+	fmt.Print("completeBilling is start...\n")
 	ts := []TenantRow{}
 	if err := adminDB.Select(
 		&ts,
@@ -1718,6 +1719,7 @@ func completeBilling() error {
 	); err != nil {
 		return fmt.Errorf("failed to Select tenant: %w\n", err)
 	}
+	fmt.Printf("select tenant is done: %d \n", len(ts))
 	for _, t := range ts {
 		updateBilling(t.ID)
 	}
