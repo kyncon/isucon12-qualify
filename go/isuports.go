@@ -133,6 +133,9 @@ func SetCacheControlPrivate(next echo.HandlerFunc) echo.HandlerFunc {
 
 // Run は cmd/isuports/main.go から呼ばれるエントリーポイントです
 func Run() {
+	// TODO: Dockerを剥がしてから
+	// initProfiler()
+
 	e := echo.New()
 	e.Debug = true
 	e.Logger.SetLevel(log.DEBUG)
@@ -1116,7 +1119,6 @@ func competitionScoreHandler(c echo.Context) error {
 				"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
 				ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt, err,
 			)
-
 		}
 	}
 
