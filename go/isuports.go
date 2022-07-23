@@ -685,6 +685,9 @@ func tenantsBillingHandler(c echo.Context) error {
 			DisplayName: t.DisplayName,
 			BillingYen:  t.Billing,
 		}
+		if tb.BillingYen == 0 {
+			tb.BillingYen = updateBilling(t.ID)
+		}
 		tenantBillings = append(tenantBillings, tb)
 	}
 	return c.JSON(http.StatusOK, SuccessResult{
@@ -695,7 +698,7 @@ func tenantsBillingHandler(c echo.Context) error {
 	})
 }
 
-func updateBilling(tenantId int64) {
+func updateBilling(tenantId int64) int64 {
 	fmt.Printf("update billing start\n")
 	ctx := context.Background()
 	var billingYen int64
@@ -730,6 +733,7 @@ func updateBilling(tenantId int64) {
 		}
 	}
 	fmt.Printf("billing update:  %v", time.Now().Sub(start))
+	return billingYen
 }
 
 type PlayerDetail struct {
@@ -1702,9 +1706,6 @@ func initializeHandler(c echo.Context) error {
 	out, err := exec.Command(initializeScript).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
-	}
-	if err = completeBilling(); err != nil {
-		return fmt.Errorf("error complete billing: %e", err)
 	}
 	res := InitializeHandlerResult{
 		Lang: "go",
